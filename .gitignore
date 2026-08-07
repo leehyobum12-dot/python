@@ -1,0 +1,39 @@
+# ═══════════ ① 가상환경 (4개 전부) ═══════════
+.venv*
+venv/
+env/
+.conda/
+
+# ═══════════ ② Python 빌드 산출물 ═══════════
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# ═══════════ ③ 기밀 (절대 커밋 금지) ═══════════
+.env
+.env.*
+!.env.example
+
+# ═══════════ ④ 파이프라인 산출물 (위치 무관) ═══════════
+out/
+**/data/raw/
+**/data/checkpoint/
+*.log
+
+# ═══════════ ⑤ Prefect 워크플로우 산출물 ═══════════
+.prefect/
+
+# ═══════════ ⑥ IDE ═══════════
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ═══════════ ⑦ OS ═══════════
+.DS_Store
+Thumbs.db

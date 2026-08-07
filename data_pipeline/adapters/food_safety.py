@@ -1,16 +1,17 @@
 # data_pipeline/adapters/food_safety.py
-import os, json, requests, time
-import xml.etree.ElementTree as ET
+import os, json, glob, requests, time
 from typing import List, Optional
-from .base import BaseAdapter, CertRecord, parse_addr_tokens, norm_name, norm_addr
+from urllib.parse import urlparse, unquote
+from .base import BaseAdapter, CertRecord, parse_addr_tokens, match_prefixes
 
 
 class FoodSafetyAdapter(BaseAdapter):
     """
-    식품안심업소(위생등급) 지정 현황 — 3중 폴백
-      1순위: .env FOOD_SAFETY_URL (data.go.kr 정확한 URL)
-      2순위: data.go.kr MFDS 기관(1471000) 후보 operation 자동 프로빙
-      3순위: 식약처 원본 C004 (서버 필터 없음 → 클라이언트 필터)
+    식품안심업소(위생등급) 지정 현황 — 멀티 벤더 페일오버 + 스냅샷 모드
+      1순위: data.go.kr 미러 (FOOD_SAFETY_DATAGO_URL + DATA_GO_KR_KEY)
+      2순위: 식약처 원본 C004 (FOODSAFETY_KOREA_KEY)
+      3순위: 로컬 원본 리플레이
+      + 스냅샷 모드: 전국 1회 스캔 후 로컬 슬라이스로 시도별 분배
     """
     DATAGO_ORG = "1471000"
     CANDIDATES = [
@@ -19,174 +20,303 @@ class FoodSafetyAdapter(BaseAdapter):
         ("HsncyStdrRstrn", "getHsncyStdrRstrn"),
         ("FoodSafetyGradeRstrn", "getFoodSafetyGradeRstrn"),
     ]
+    MFDS_URL_TPL = "http://openapi.foodsafetykorea.go.kr/api/{key}/C004/json/{start}/{end}"
     PROBE_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                '..', 'out', 'food_safety_endpoint.json')
+    RAW_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           '..', 'data', 'raw', 'food_safety')
+    REPLAY_MAX_AGE_DAYS = 7
     PAGE_SIZE = 500
     TIMEOUT = 60
     MAX_RETRY = 5
 
-    def __init__(self, service_key: str):
+    FIELD_CANDIDATES = {
+        'name':       ('BSSH_NM', 'UPSO_NM', 'ENTRPS_NM', '업소명', '상호명', '영업소명'),
+        'addr':       ('ADDR', 'SITE_ADDR', 'RDNMADR', 'ROAD_NM_ADDR',
+                       '도로명주소', '소재지도로명주소', '영업장소재지', '소재지'),
+        'lot':        ('JIBUN_ADDR', 'LOT_ADDR', '지번주소'),
+        'phone':      ('TELNO', 'TEL', '전화번호', '업소전화번호'),
+        'biz':        ('INDUTY_NM', 'INDUTY_CD_NM', '업종명', '업태구분명'),
+        'designated': ('ASGN_FROM', 'ASGN_YMD', 'PRMISN_YMD',
+                       '지정일자', '허가일자', '지정시작일자'),
+        'status':     ('CLSBIZ_DVS_CD_NM', '영업상태', 'BIZ_STT_CD_NM'),
+        'closed':     ('CLSBIZ_DT', '폐업일자', 'CLOSE_DT'),
+        'cancel':     ('ASGN_CANCEL_YMD', '지정취소일자'),
+        'menu':       ('MAIN_MENU', 'MENU_NM', '대표메뉴', '주메뉴'),
+    }
+
+    def __init__(self, service_key: str, datago_key: str = '', snapshot_first: bool = False):
         self.service_key = (service_key or "").strip()
+        self.datago_key = (datago_key or "").strip()
+        self.snapshot_first = snapshot_first
         self.raw_rows = []
 
     def _key(self):
-        from urllib.parse import unquote
         return unquote(self.service_key) if '%' in self.service_key else self.service_key
 
-    def _get(self, d, *keys):
-        for k in keys:
+    def _datago_key(self):
+        return unquote(self.datago_key) if '%' in self.datago_key else self.datago_key
+
+    def _get_any(self, d: dict, field: str) -> str:
+        if not isinstance(d, dict):
+            return ''
+        for k in self.FIELD_CANDIDATES[field]:
             v = d.get(k)
             if v:
                 return str(v).strip()
+        for cand in self.FIELD_CANDIDATES[field]:
+            if not cand.isascii():
+                for dk, dv in d.items():
+                    if dv and cand in str(dk):
+                        return str(dv).strip()
         return ''
 
+    def _normalize_items(self, items) -> list:
+        if items in (None, '', [], {}):
+            return []
+        if isinstance(items, dict):
+            items = items.get('item', [])
+        if items in (None, ''):
+            return []
+        if isinstance(items, dict):
+            return [items]
+        return items if isinstance(items, list) else []
+
+    def _looks_like_food_safety(self, sample: dict) -> bool:
+        return bool(self._get_any(sample, 'name')) and bool(self._get_any(sample, 'addr'))
+
+    def _valid_url(self, u: str) -> bool:
+        try:
+            p = urlparse(u)
+            return p.scheme in ('http', 'https') and bool(p.netloc)
+        except Exception:
+            return False
+
+    def _validate_datago_url(self, url: str) -> bool:
+        try:
+            res = requests.get(url, params={'serviceKey': self._datago_key(),
+                               'pageNo': 1, 'numOfRows': 1, 'type': 'json'},
+                               timeout=self.TIMEOUT)
+            if res.status_code != 200:
+                return False
+            data = res.json()
+            header = (data.get('response') or {}).get('header') or {}
+            if str(header.get('resultCode', '')) not in ('00', 'INFO-000', 'NORMAL SERVICE'):
+                return False
+            body = (data.get('response') or {}).get('body') or {}
+            items = self._normalize_items(body.get('items'))
+            if not items:
+                return False
+            return self._looks_like_food_safety(items[0])
+        except Exception:
+            return False
+
     def _probe_datago(self) -> Optional[str]:
+        if not self.datago_key:
+            return None
         if os.path.exists(self.PROBE_CACHE):
             try:
                 with open(self.PROBE_CACHE, encoding='utf-8') as f:
                     url = json.load(f).get('url')
-                if url:
+                if url and self._valid_url(url) and self._validate_datago_url(url):
                     return url
+                os.remove(self.PROBE_CACHE)
             except Exception:
                 pass
         for svc, op in self.CANDIDATES:
             url = f"https://apis.data.go.kr/{self.DATAGO_ORG}/{svc}/{op}"
-            try:
-                res = requests.get(url, params={'serviceKey': self._key(),
-                                   'pageNo': 1, 'numOfRows': 1, 'type': 'json'},
-                                   timeout=self.TIMEOUT)
-                if res.status_code == 200 and '"item"' in res.text:
-                    with open(self.PROBE_CACHE, 'w', encoding='utf-8') as f:
-                        json.dump({'url': url}, f)
-                    print(f"✅ [food_safety] data.go.kr 엔드포인트 탐지: {svc}/{op}")
-                    return url
-            except Exception:
-                continue
+            if self._validate_datago_url(url):
+                with open(self.PROBE_CACHE, 'w', encoding='utf-8') as f:
+                    json.dump({'url': url}, f)
+                print(f"✅ [food_safety] data.go.kr 탐지: {svc}/{op}")
+                return url
         return None
 
-    def _fetch_page(self, kind, url, page, start, end):
-        if kind == 'datago':
-            res = requests.get(url, params={'serviceKey': self._key(), 'pageNo': page,
-                               'numOfRows': self.PAGE_SIZE, 'type': 'json'},
-                               timeout=self.TIMEOUT)
-            if res.status_code != 200:
-                return None
-            body = res.json().get('response', {}).get('body', {})
-            items = body.get('items', {})
-            return items.get('item', []) if isinstance(items, dict) else (items or [])
-        else:
-            # mfds C004 — 재시도 로직 강화
-            for attempt in range(self.MAX_RETRY):
+    def _fetch_datago_page(self, url, page):
+        res = requests.get(url, params={'serviceKey': self._datago_key(),
+                           'pageNo': page, 'numOfRows': self.PAGE_SIZE,
+                           'type': 'json'}, timeout=self.TIMEOUT)
+        if res.status_code != 200:
+            return None
+        body = (res.json().get('response') or {}).get('body') or {}
+        items = self._normalize_items(body.get('items'))
+        if page == 1 and items:
+            print(f"   🔎 [food_safety] datago 스키마: {list(items[0].keys())}")
+        return items
+
+    def _fetch_mfds_page(self, start, end):
+        last_err = ''
+        for attempt in range(self.MAX_RETRY):
+            try:
+                res = requests.get(
+                    self.MFDS_URL_TPL.format(key=self._key(), start=start, end=end),
+                    timeout=self.TIMEOUT)
+                if res.status_code != 200:
+                    raise IOError(f'HTTP {res.status_code}')
+                res.encoding = 'utf-8'
                 try:
-                    res = requests.get(url.format(key=self._key(), start=start, end=end),
-                                       timeout=self.TIMEOUT)
-                    res.encoding = 'utf-8'
-                    if res.status_code != 200:
-                        continue
-                    payload = res.json().get('C004', {})
-                    result = payload.get('RESULT')
-                    code = ''
-                    if isinstance(result, list) and result:
-                        code = (result[0] or {}).get('CODE', '')
-                    elif isinstance(result, dict):
-                        code = result.get('CODE', '')
-                    if code not in (None, '', 'INFO-000'):
-                        return None
-                    rows = payload.get('row', [])
-                    return [rows] if isinstance(rows, dict) else rows
-                except Exception as e:
-                    if attempt < self.MAX_RETRY - 1:
-                        print(f"   ↻ [food_safety] mfds 재시도 {attempt+1}/{self.MAX_RETRY}: {e}")
-                        time.sleep(5 * (attempt + 1))
-                        continue
-                    raise
+                    data = res.json()
+                except json.JSONDecodeError:
+                    raise IOError('Invalid JSON (점검 페이지 의심)')
+                payload = data.get('C004', {})
+                result = payload.get('RESULT')
+                code = ''
+                if isinstance(result, list) and result:
+                    code = (result[0] or {}).get('CODE', '')
+                elif isinstance(result, dict):
+                    code = result.get('CODE', '')
+                if code == 'ERROR-500':
+                    raise IOError('ERROR-500')
+                if code not in (None, '', 'INFO-000'):
+                    print(f"   🚨 [food_safety] mfds 치명 코드: {code}")
+                    return None
+                rows = payload.get('row', [])
+                return [rows] if isinstance(rows, dict) else rows
+            except Exception as e:
+                last_err = str(e)
+                if attempt < self.MAX_RETRY - 1:
+                    print(f"   ↻ [food_safety] mfds 재시도 {attempt+1}/{self.MAX_RETRY}: {e}")
+                    time.sleep(5 * (attempt + 1))
+                    continue
+                raise
+        print(f"   ⚠️ [food_safety] mfds 재시도 소진: {last_err}")
+        return None
+
+    def _parse_rows(self, rows, province) -> List[CertRecord]:
+        records = []
+        prefixes = match_prefixes(province) if province else None
+        for item in rows:
+            addr = self._get_any(item, 'addr')
+            if not addr:
+                continue
+            if prefixes and not addr.startswith(prefixes):
+                continue
+            p, m, e = parse_addr_tokens(addr)
+            clsbiz_dt = self._get_any(item, 'closed')
+            cancel_dt = self._get_any(item, 'cancel')
+            status = self._get_any(item, 'status')
+            records.append(CertRecord(
+                source='mfds-food-safety', cert_type='food_safety',
+                raw_name=self._get_any(item, 'name'),
+                raw_address=addr, province=p, municipality=m, emd=e,
+                road_name=addr,
+                lot_num=self._get_any(item, 'lot') or '',
+                main_menu=self._get_any(item, 'menu'),
+                phone=self._get_any(item, 'phone'),
+                biz_type=self._get_any(item, 'biz'),
+                designated_at=self._get_any(item, 'designated'),
+                cancelled_at=cancel_dt or None,
+                closed_at=clsbiz_dt or None,
+                is_active=('폐업' not in status and not clsbiz_dt and not cancel_dt),
+                raw=item,
+            ))
+        return records
+
+    def _replay_from_raw(self, province) -> List[CertRecord]:
+        if not os.path.exists(self.RAW_DIR):
+            return []
+        
+        # ✅ province=None이면 가장 큰 파일 우선 (전국 데이터 확률 높음)
+        files = sorted(glob.glob(os.path.join(self.RAW_DIR, '*.json')),
+                    key=lambda f: (os.path.getsize(f), os.path.getmtime(f)),
+                    reverse=True)
+        
+        for f in files:
+            age_days = (time.time() - os.path.getmtime(f)) / 86400
+            if age_days > self.REPLAY_MAX_AGE_DAYS:
+                continue
+            try:
+                with open(f, encoding='utf-8') as fh:
+                    rows = json.load(fh)
+            except Exception:
+                continue
+            if not rows:
+                continue
+            
+            parsed = self._parse_rows(rows, province)
+            if parsed:
+                print(f"   💾 [food_safety] 벤더 실패 → 원본 리플레이: "
+                    f"{os.path.basename(f)} ({len(rows)}건, {age_days:.1f}일 전)")
+                # ✅ raw_rows도 채워서 archive_raw가 nationwide_latest.json 생성 가능
+                self.raw_rows = rows
+                return parsed
+        return []
+
+    def _load_nationwide_snapshot(self) -> Optional[list]:
+        """✅ 스냅샷 모드: 전국 1회 스캔 결과 로드 (24시간 이내만 신뢰)"""
+        f = os.path.join(self.RAW_DIR, 'nationwide_latest.json')
+        if not os.path.exists(f):
+            return None
+        age_days = (time.time() - os.path.getmtime(f)) / 86400
+        if age_days > 1:
+            return None
+        try:
+            with open(f, encoding='utf-8') as fh:
+                rows = json.load(fh)
+            print(f"   📸 [food_safety] 스냅샷 모드 활성화 ({len(rows)}건, {age_days:.2f}일 전)")
+            return rows
+        except Exception:
             return None
 
     def collect(self, province: Optional[str] = None) -> List[CertRecord]:
-        if not self.service_key:
+        if not self.service_key and not self.datago_key:
             print("⚠️ [food_safety] 키 미설정 — 스킵")
             return []
 
-        env_url = os.getenv('FOOD_SAFETY_URL', '').strip()
+        # ✅ 스냅샷 모드 우선 체크
+        if self.snapshot_first and province:
+            snap = self._load_nationwide_snapshot()
+            if snap:
+                records = self._parse_rows(snap, province)
+                print(f"✅ [food_safety] 스냅샷 모드 — {len(records)}건 (API 호출 0회)")
+                return [r for r in records if r.is_valid()]
+
         strategies = []
-        if env_url:
+        env_url = os.getenv('FOOD_SAFETY_DATAGO_URL', '').strip()
+        if self.datago_key and self._valid_url(env_url):
             strategies.append(('datago', env_url))
-        probed = self._probe_datago()
-        if probed and probed != env_url:
-            strategies.append(('datago', probed))
-        strategies.append(('mfds',
-            "http://openapi.foodsafetykorea.go.kr/api/{key}/C004/json/{start}/{end}"))
+        elif self.datago_key:
+            probed = self._probe_datago()
+            if probed:
+                strategies.append(('datago', probed))
+        if self.service_key:
+            strategies.append(('mfds', self.MFDS_URL_TPL))
+
+        print(f"   📋 [food_safety] 페일오버 전략: {[s[0] for s in strategies]}")
 
         for kind, url in strategies:
-            records, page, start = [], 1, 1
+            collected_rows = []
+            page, start = 1, 1
             while True:
                 end = start + self.PAGE_SIZE - 1
                 try:
-                    items = self._fetch_page(kind, url, page, start, end)
+                    items = (self._fetch_datago_page(url, page) if kind == 'datago'
+                             else self._fetch_mfds_page(start, end))
                 except Exception as e:
                     print(f"⚠️ [food_safety] {kind} page={page}: {e}")
-                    print(f"   [food_safety] 중단됨 — 재실행 시 FOOD_SAFETY_RESUME_PAGE={page} 설정")
                     break
                 if not items:
                     break
-
-                for item in items:
-                    self.raw_rows.append(item)
-
-                    # ✅ 주소 파싱 (다중 필드명 방어)
-                    addr = self._get(item, 'ADDR', 'SITE_ADDR', 'ADDR_NAME',
-                                     '소재지도로명주소', 'RDNMADR')
-                    if not addr:
-                        continue
-                    if province and not addr.startswith(province):
-                        continue
-
-                    p, m, e = parse_addr_tokens(addr)
-
-                    # ✅ 상세 주소 필드 (있는 경우만 추출)
-                    road_name = self._get(item, 'RDNMADR', 'ROAD_NM_ADDR', '도로명주소') or addr
-                    lot_num = self._get(item, 'JIBUN_ADDR', 'LOT_ADDR', '지번주소') or ''
-
-                    # ✅ 메뉴 (있는 경우만)
-                    main_menu = self._get(item, 'MAIN_MENU', 'MENU_NM', '대표메뉴', '주메뉴')
-
-                    clsbiz_dt = self._get(item, 'CLSBIZ_DT')
-                    cancel_dt = self._get(item, 'ASGN_CANCEL_YMD')
-                    status = self._get(item, 'CLSBIZ_DVS_CD_NM')
-
-                    records.append(CertRecord(
-                        source='mfds-food-safety',
-                        cert_type='food_safety',
-                        raw_name=self._get(item, 'BSSH_NM', 'UPSO_NM', '업소명'),
-                        raw_address=addr,
-                        province=p,
-                        municipality=m,
-                        emd=e,
-                        road_name=road_name,
-                        lot_num=lot_num,
-                        main_menu=main_menu,
-                        phone=self._get(item, 'TELNO'),
-                        biz_type=self._get(item, 'INDUTY_NM'),
-                        designated_at=self._get(item, 'ASGN_FROM'),
-                        cancelled_at=cancel_dt or None,
-                        closed_at=clsbiz_dt or None,
-                        is_active=('폐업' not in status and not clsbiz_dt and not cancel_dt),
-                        raw=item,
-                    ))
-
+                collected_rows.extend(items)
                 if len(items) < self.PAGE_SIZE:
                     break
                 page += 1
                 start = end + 1
                 time.sleep(0.4)
+                if (start - 1) % 5000 == 0:
+                    print(f"   [food_safety] 진행: {start-1}건 스캔")
 
-                # 진행 상황 로깅 (1000건마다)
-                if start > 1 and (start - 1) % 5000 == 0:
-                    print(f"   [food_safety] 진행: {start-1}건 스캔, {len(records)}건 필터 통과")
-
-            if records or self.raw_rows:
-                print(f"✅ [food_safety] {kind} 전략 성공 — {len(records)}건 (원본 {len(self.raw_rows)}건)")
+            if collected_rows:
+                self.raw_rows = collected_rows
+                records = self._parse_rows(collected_rows, province)
+                print(f"✅ [food_safety] {kind} 벤더 성공 — {len(records)}건 "
+                      f"(원본 {len(collected_rows)}건)")
                 return [r for r in records if r.is_valid()]
 
-        print("🚨 [food_safety] 모든 전략 실패 — .env FOOD_SAFETY_URL 확인 필요")
+        replayed = self._replay_from_raw(province)
+        if replayed:
+            print(f"✅ [food_safety] 리플레이 성공 — {len(replayed)}건")
+            return [r for r in replayed if r.is_valid()]
+
+        print("🚨 [food_safety] 모든 벤더 실패")
         return []

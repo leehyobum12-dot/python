@@ -1,9 +1,13 @@
 # data_pipeline/ingest_to_supabase.py
-import os, re, csv
+import os, re, csv, glob
 from dotenv import load_dotenv
 from supabase import create_client
+import time
 
 load_dotenv()
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 sb = create_client(os.getenv('SUPABASE_URL').strip(),
                    os.getenv('SUPABASE_SERVICE_ROLE_KEY').strip())
 CHUNK = 5000
@@ -37,7 +41,7 @@ def split_tags(v):
 
 
 def consolidate(rows):
-    """✅ 동일 dedup_key 행 병합 (21000 에러 근본 방어) — 배지·태그는 UNION"""
+    """동일 dedup_key 행 병합 (21000 에러 방어)"""
     merged = {}
     for row in rows:
         key = row['dedup_key']
@@ -55,18 +59,17 @@ def consolidate(rows):
     return list(merged.values())
 
 
-def main(csv_path='out/제주특별자치도.csv'):
-    rows, skipped = [], 0
+def load_csv(csv_path):
+    """단일 CSV 파일 로드"""
+    rows = []
     with open(csv_path, encoding='utf-8-sig') as f:
         for r in csv.DictReader(f):
             try:
                 lat, lng = float(r['lat']), float(r['lng'])
             except Exception:
-                skipped += 1
                 continue
             dk = (r.get('dedup_key') or '').strip()
             if not dk or dk in ('|', '||'):
-                skipped += 1
                 continue
             rows.append({
                 'store_name': (r['store_name'] or '').strip(),
@@ -87,19 +90,64 @@ def main(csv_path='out/제주특별자치도.csv'):
                 'allergen_tags': split_tags(r.get('allergen_tags')),
                 'occasion_tags': split_tags(r.get('occasion_tags')),
             })
+    return rows
 
-    before = len(rows)
-    rows = consolidate(rows)
-    print(f"📥 적재 대상: {len(rows)}건 (스킵: {skipped}건, 중복 통합: {before - len(rows)}건)")
+
+def main(csv_pattern=None, single_file=None, analyze_after=True):
+    if csv_pattern is None:
+        csv_pattern = os.path.join(BASE_DIR, 'out', '*.csv')
+    """전국 CSV 통합 적재 또는 단일 파일 적재"""
+    all_rows = []
+    
+    if single_file:
+        print(f"📥 단일 파일 적재: {single_file}")
+        all_rows = load_csv(single_file)
+    else:
+        files = sorted(glob.glob(csv_pattern))
+        print(f"📥 전국 CSV 통합 적재: {len(files)}개 파일")
+        for f in files:
+            rows = load_csv(f)
+            print(f"   {os.path.basename(f)}: {len(rows)}건")
+            all_rows.extend(rows)
+
+    before = len(all_rows)
+    all_rows = consolidate(all_rows)
+    print(f"📥 적재 대상: {len(all_rows)}건 (중복 통합: {before - len(all_rows)}건)")
 
     total = 0
-    for i in range(0, len(rows), CHUNK):
-        chunk = rows[i:i + CHUNK]
-        res = sb.rpc('bulk_upsert_restaurants', {'payload': chunk}).execute()
-        total += int(res.data or 0)
-        print(f"✅ bulk upsert {min(i + CHUNK, len(rows))}/{len(rows)} (affected {res.data})")
+    for i in range(0, len(all_rows), CHUNK):
+        chunk = all_rows[i:i + CHUNK]
+        
+        # ✅ 네트워크 재시도 (지수 백오프)
+        for attempt in range(3):
+            try:
+                res = sb.rpc('bulk_upsert_restaurants', {'payload': chunk}).execute()
+                total += int(res.data or 0)
+                print(f"✅ bulk upsert {min(i + CHUNK, len(all_rows))}/{len(all_rows)} (affected {res.data})")
+                break
+            except Exception as e:
+                if attempt < 2:
+                    wait = 2 ** attempt
+                    print(f"   ↻ 재시도 {attempt+1}/3 (대기 {wait}초): {e}")
+                    time.sleep(wait)
+                else:
+                    raise
+    
     print(f"🎉 총 affected: {total}건")
-
+    
+    # ✅ 적재 후 통계 갱신
+    if analyze_after:
+        try:
+            sb.rpc('analyze_restaurants').execute()
+            print("📊 ANALYZE 완료 (GiST/GiN 인덱스 통계 갱신)")
+        except Exception as e:
+            print(f"⚠️ ANALYZE 실패: {e}")
 
 if __name__ == '__main__':
-    main()
+    import sys
+    if len(sys.argv) > 1:
+        # 단일 파일 적재: python ingest_to_supabase.py out/제주특별자치도.csv
+        main(single_file=sys.argv[1])
+    else:
+        # 전국 통합 적재: python ingest_to_supabase.py
+        main()
