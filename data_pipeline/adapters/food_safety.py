@@ -1,8 +1,15 @@
-# data_pipeline/adapters/food_safety.py
 import os, json, glob, requests, time
 from typing import List, Optional
 from urllib.parse import urlparse, unquote
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .base import BaseAdapter, CertRecord, parse_addr_tokens, match_prefixes
+
+try:
+    import ijson
+    IJSON_AVAILABLE = True
+except ImportError:
+    IJSON_AVAILABLE = False
+    print("⚠️ ijson 미설치 — 스트리밍 파서 비활성화 (pip install ijson 권장)")
 
 
 class FoodSafetyAdapter(BaseAdapter):
@@ -12,6 +19,8 @@ class FoodSafetyAdapter(BaseAdapter):
       2순위: 식약처 원본 C004 (FOODSAFETY_KOREA_KEY)
       3순위: 로컬 원본 리플레이
       + 스냅샷 모드: 전국 1회 스캔 후 로컬 슬라이스로 시도별 분배
+      + ✅ 병렬 페이지 수집 (mfds)
+      + ✅ 스트리밍 JSON 파서 (메모리 O(1))
     """
     DATAGO_ORG = "1471000"
     CANDIDATES = [
@@ -145,6 +154,7 @@ class FoodSafetyAdapter(BaseAdapter):
         return items
 
     def _fetch_mfds_page(self, start, end):
+        """순차 호출용 (기존 유지)"""
         last_err = ''
         for attempt in range(self.MAX_RETRY):
             try:
@@ -182,6 +192,44 @@ class FoodSafetyAdapter(BaseAdapter):
         print(f"   ⚠️ [food_safety] mfds 재시도 소진: {last_err}")
         return None
 
+    def _fetch_mfds_page_parallel(self, start: int, end: int) -> List[dict]:
+        """✅ 병렬 호출용 (ThreadPoolExecutor용)"""
+        last_err = ''
+        for attempt in range(self.MAX_RETRY):
+            try:
+                res = requests.get(
+                    self.MFDS_URL_TPL.format(key=self._key(), start=start, end=end),
+                    timeout=self.TIMEOUT
+                )
+                if res.status_code != 200:
+                    raise IOError(f'HTTP {res.status_code}')
+                res.encoding = 'utf-8'
+                try:
+                    data = res.json()
+                except json.JSONDecodeError:
+                    raise IOError('Invalid JSON')
+                payload = data.get('C004', {})
+                result = payload.get('RESULT')
+                code = ''
+                if isinstance(result, list) and result:
+                    code = (result[0] or {}).get('CODE', '')
+                elif isinstance(result, dict):
+                    code = result.get('CODE', '')
+                if code == 'ERROR-500':
+                    raise IOError('ERROR-500')
+                if code not in (None, '', 'INFO-000'):
+                    return []
+                rows = payload.get('row', [])
+                return [rows] if isinstance(rows, dict) else rows
+            except Exception as e:
+                last_err = str(e)
+                if attempt < self.MAX_RETRY - 1:
+                    time.sleep(5 * (attempt + 1))
+                    continue
+                raise
+        print(f"   ⚠️ [food_safety] mfds 병렬 재시도 소진: {last_err}")
+        return []
+
     def _parse_rows(self, rows, province) -> List[CertRecord]:
         records = []
         prefixes = match_prefixes(province) if province else None
@@ -212,11 +260,45 @@ class FoodSafetyAdapter(BaseAdapter):
             ))
         return records
 
+    def _parse_rows_streaming(self, items_iterator, province) -> List[CertRecord]:
+        """✅ 스트리밍 파서용 레코드 변환 (메모리 O(1))"""
+        records = []
+        prefixes = match_prefixes(province) if province else None
+        
+        for item in items_iterator:
+            addr = self._get_any(item, 'addr')
+            if not addr:
+                continue
+            if prefixes and not addr.startswith(prefixes):
+                continue
+            
+            p, m, e = parse_addr_tokens(addr)
+            clsbiz_dt = self._get_any(item, 'closed')
+            cancel_dt = self._get_any(item, 'cancel')
+            status = self._get_any(item, 'status')
+            
+            records.append(CertRecord(
+                source='mfds-food-safety', cert_type='food_safety',
+                raw_name=self._get_any(item, 'name'),
+                raw_address=addr, province=p, municipality=m, emd=e,
+                road_name=addr,
+                lot_num=self._get_any(item, 'lot') or '',
+                main_menu=self._get_any(item, 'menu'),
+                phone=self._get_any(item, 'phone'),
+                biz_type=self._get_any(item, 'biz'),
+                designated_at=self._get_any(item, 'designated'),
+                cancelled_at=cancel_dt or None,
+                closed_at=clsbiz_dt or None,
+                is_active=('폐업' not in status and not clsbiz_dt and not cancel_dt),
+                raw=item,
+            ))
+        
+        return records
+
     def _replay_from_raw(self, province) -> List[CertRecord]:
         if not os.path.exists(self.RAW_DIR):
             return []
         
-        # ✅ province=None이면 가장 큰 파일 우선 (전국 데이터 확률 높음)
         files = sorted(glob.glob(os.path.join(self.RAW_DIR, '*.json')),
                     key=lambda f: (os.path.getsize(f), os.path.getmtime(f)),
                     reverse=True)
@@ -237,13 +319,12 @@ class FoodSafetyAdapter(BaseAdapter):
             if parsed:
                 print(f"   💾 [food_safety] 벤더 실패 → 원본 리플레이: "
                     f"{os.path.basename(f)} ({len(rows)}건, {age_days:.1f}일 전)")
-                # ✅ raw_rows도 채워서 archive_raw가 nationwide_latest.json 생성 가능
                 self.raw_rows = rows
                 return parsed
         return []
 
     def _load_nationwide_snapshot(self) -> Optional[list]:
-        """✅ 스냅샷 모드: 전국 1회 스캔 결과 로드 (24시간 이내만 신뢰)"""
+        """기존 방식 (ijson 없을 때 fallback)"""
         f = os.path.join(self.RAW_DIR, 'nationwide_latest.json')
         if not os.path.exists(f):
             return None
@@ -258,16 +339,44 @@ class FoodSafetyAdapter(BaseAdapter):
         except Exception:
             return None
 
+    def _load_nationwide_snapshot_streaming(self):
+        """✅ 스트리밍 파서: 메모리 사용량 O(1) 유지"""
+        if not IJSON_AVAILABLE:
+            return self._load_nationwide_snapshot()
+        
+        f = os.path.join(self.RAW_DIR, 'nationwide_latest.json')
+        if not os.path.exists(f):
+            return None
+        age_days = (time.time() - os.path.getmtime(f)) / 86400
+        if age_days > 1:
+            return None
+        
+        try:
+            def stream_items():
+                with open(f, 'rb') as fh:
+                    for item in ijson.items(fh, 'item'):
+                        yield item
+            
+            print(f"   📸 [food_safety] 스냅샷 모드 (스트리밍) — {age_days:.2f}일 전")
+            return stream_items()
+        except Exception:
+            return None
+
     def collect(self, province: Optional[str] = None) -> List[CertRecord]:
         if not self.service_key and not self.datago_key:
             print("⚠️ [food_safety] 키 미설정 — 스킵")
             return []
 
-        # ✅ 스냅샷 모드 우선 체크
+        # ✅ 스냅샷 모드 우선 체크 (스트리밍 버전)
         if self.snapshot_first and province:
-            snap = self._load_nationwide_snapshot()
-            if snap:
-                records = self._parse_rows(snap, province)
+            snap_stream = self._load_nationwide_snapshot_streaming()
+            if snap_stream:
+                if IJSON_AVAILABLE and hasattr(snap_stream, '__iter__') and not isinstance(snap_stream, list):
+                    # 스트리밍 파서 사용
+                    records = self._parse_rows_streaming(snap_stream, province)
+                else:
+                    # 기존 방식 fallback
+                    records = self._parse_rows(snap_stream, province)
                 print(f"✅ [food_safety] 스냅샷 모드 — {len(records)}건 (API 호출 0회)")
                 return [r for r in records if r.is_valid()]
 
@@ -286,25 +395,64 @@ class FoodSafetyAdapter(BaseAdapter):
 
         for kind, url in strategies:
             collected_rows = []
-            page, start = 1, 1
-            while True:
-                end = start + self.PAGE_SIZE - 1
-                try:
-                    items = (self._fetch_datago_page(url, page) if kind == 'datago'
-                             else self._fetch_mfds_page(start, end))
-                except Exception as e:
-                    print(f"⚠️ [food_safety] {kind} page={page}: {e}")
-                    break
-                if not items:
-                    break
-                collected_rows.extend(items)
-                if len(items) < self.PAGE_SIZE:
-                    break
-                page += 1
-                start = end + 1
-                time.sleep(0.4)
-                if (start - 1) % 5000 == 0:
-                    print(f"   [food_safety] 진행: {start-1}건 스캔")
+            
+            if kind == 'datago':
+                # datago는 순차적 (기존 유지)
+                page, start = 1, 1
+                while True:
+                    end = start + self.PAGE_SIZE - 1
+                    try:
+                        items = self._fetch_datago_page(url, page)
+                    except Exception as e:
+                        print(f"⚠️ [food_safety] {kind} page={page}: {e}")
+                        break
+                    if not items:
+                        break
+                    collected_rows.extend(items)
+                    if len(items) < self.PAGE_SIZE:
+                        break
+                    page += 1
+                    start = end + 1
+                    time.sleep(0.4)
+                    if (start - 1) % 5000 == 0:
+                        print(f"   [food_safety] 진행: {start-1}건 스캔")
+            else:
+                # ✅ mfds는 병렬 처리 (신규)
+                # 1단계: 첫 페이지로 전체 건수 파악
+                first_page = self._fetch_mfds_page_parallel(1, self.PAGE_SIZE)
+                if not first_page:
+                    continue
+                
+                collected_rows.extend(first_page)
+                
+                # 첫 페이지 결과으로 전체 건수 추정
+                # 실제 mfds API는 totalCount를 제공하지 않으므로 보수적으로 추정
+                estimated_total = len(first_page) * 100  # 임시 추정치 (실제 데이터에 따라 조정)
+                
+                # 2단계: 나머지 페이지 병렬 수집
+                pages = list(range(2, min(100, (estimated_total // self.PAGE_SIZE) + 2)))
+                if pages:
+                    print(f"   🚀 [food_safety] mfds {len(pages)}개 페이지 병렬 수집 시작...")
+                    
+                    with ThreadPoolExecutor(max_workers=8) as executor:
+                        futures = {
+                            executor.submit(self._fetch_mfds_page_parallel, 
+                                          (p-1)*self.PAGE_SIZE + 1, 
+                                          p*self.PAGE_SIZE): p
+                            for p in pages
+                        }
+                        
+                        done_count = 0
+                        for future in as_completed(futures):
+                            try:
+                                page_rows = future.result()
+                                collected_rows.extend(page_rows)
+                                done_count += 1
+                                if done_count % 10 == 0:
+                                    print(f"   [food_safety] 병렬 진행: {done_count}/{len(pages)} 페이지")
+                            except Exception as e:
+                                print(f"   ⚠️ [food_safety] 병렬 수집 실패: {e}")
+                                continue
 
             if collected_rows:
                 self.raw_rows = collected_rows

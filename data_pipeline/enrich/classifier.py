@@ -1,6 +1,9 @@
 # data_pipeline/enrich/classifier.py
 """메뉴명 기반 7차원 태깅 엔진 (v1 휴리스틱)"""
 
+from typing import Optional, Set, Tuple, List, Dict
+
+# ─────────────── 재료 키워드 ───────────────
 INGREDIENT_KEYWORDS = {
     '돼지': ['돼지', '흑돼지', '돈가스', '돈까스', '삼겹', '목살', '항정', '족발', '보쌈', '제육'],
     '소': ['소고기', '쇠고기', '한우', '등심', '안심', '차돌', '도가니', '설렁', '곰탕', '육개장', '갈비', '스테이크'],
@@ -10,6 +13,7 @@ INGREDIENT_KEYWORDS = {
                '오징어', '주꾸미', '낙지', '멍게', '성게', '옥돔', '삼치', '방어', '돔', '아귀', '소라'],
 }
 
+# ─────────────── 지역 특산 키워드 ───────────────
 REGIONAL_KEYWORDS = {
     ('제주', '흑돼지'): ['흑돼지', '흑돈', '돗베'], ('제주', '갈치'): ['갈치'],
     ('제주', '전복'): ['전복'], ('제주', '소라'): ['소라', '뿔소라'], ('제주', '성게'): ['성게'],
@@ -20,6 +24,7 @@ REGIONAL_KEYWORDS = {
     ('서울·경기', '설렁탕'): ['설렁탕'], ('이북식', '냉면'): ['냉면'], ('이북식', '만두'): ['만두'],
 }
 
+# ─────────────── 알레르기 키워드 ───────────────
 ALLERGEN_KEYWORDS = {
     ('갑각류·조개류', '새우'): ['새우', '대하'], ('갑각류·조개류', '게'): ['게', '게장'],
     ('갑각류·조개류', '조개'): ['조개'], ('갑각류·조개류', '굴'): ['굴', '굴국밥'],
@@ -32,6 +37,7 @@ ALLERGEN_KEYWORDS = {
     ('견과·땅콩', '땅콩'): ['땅콩'], ('견과·땅콩', '호두'): ['호두'],
 }
 
+# ─────────────── 상황 키워드 ───────────────
 OCCASION_KEYWORDS = {
     ('뷰', '오션뷰'): ['오션뷰', '바다뷰', '해변'], ('뷰', '한옥'): ['한옥'], ('뷰', '야경'): ['야경', '루프탑'],
     ('코스·파인', '코스'): ['코스'], ('코스·파인', '파인다이닝'): ['파인'],
@@ -40,7 +46,8 @@ OCCASION_KEYWORDS = {
 }
 
 
-def _match(rules, item):
+def _match(rules: Dict[Tuple[str, str], List[str]], item: str) -> Set[str]:
+    """규칙 기반 태그 매칭 (대분류 + 소분류)"""
     out = set()
     for (p, s), kws in rules.items():
         if any(k in item for k in kws):
@@ -49,10 +56,8 @@ def _match(rules, item):
     return out
 
 
-# classifier.py — _detect_ingredients 교체
-INGREDIENT_KEYWORDS['수산물'] += ['소라']   # 소라 → 수산물로 명시
-
-def _detect_ingredients(item):
+def _detect_ingredients(item: str) -> List[str]:
+    """재료 감지 (돼지/소 감지 시 소의 약한 키워드 제거)"""
     found = [k for k, kws in INGREDIENT_KEYWORDS.items() if any(w in item for w in kws)]
     # ✅ 돼지 감지 시, 소의 "약한 키워드"(갈비·스테이크) 매칭 제거
     if '돼지' in found and '소' in found:
@@ -61,7 +66,8 @@ def _detect_ingredients(item):
     return found
 
 
-def _detect_cooking(item, ingredients):
+def _detect_cooking(item: str, ingredients: List[str]) -> Set[str]:
+    """조리법 감지"""
     out = set()
     if '탕수육' in item: out.add('튀김')
     if '국' in item and '국수' not in item: out |= {'국물', '국물:국'}
@@ -78,7 +84,8 @@ def _detect_cooking(item, ingredients):
     return out
 
 
-def _detect_nutrient(item, ingredients, cook_set):
+def _detect_nutrient(item: str, ingredients: List[str], cook_set: Set[str]) -> Set[str]:
+    """영양소 감지"""
     out = set()
     if '죽' in item: out |= {'탄수화물', '탄수화물:죽'}
     if '밥' in item: out |= {'탄수화물', '탄수화물:밥'}
@@ -94,7 +101,8 @@ def _detect_nutrient(item, ingredients, cook_set):
     return out
 
 
-def _detect_cuisine(biz, item):
+def _detect_cuisine(biz: str, item: str) -> List[Tuple[str, Optional[str]]]:
+    """음식 장르 감지"""
     biz = biz or ''
     if biz.startswith('한식'): return [('한식', '향토' if '향토' in item else '일반')]
     if biz.startswith('중식') or any(k in item for k in ('짜장', '짬', '탕수육')): return [('중식', None)]
@@ -105,7 +113,8 @@ def _detect_cuisine(biz, item):
     return [('한식', '일반')]
 
 
-def _expand(pairs):
+def _expand(pairs: List[Tuple[str, Optional[str]]]) -> Set[str]:
+    """(대분류, 소분류) 페어를 태그 집합으로 확장"""
     out = set()
     for p, s in pairs:
         out.add(p)
@@ -113,8 +122,36 @@ def _expand(pairs):
     return out
 
 
-def classify(main_menu: str, biz_type: str) -> dict:
-    items = [m.strip() for m in (main_menu or '').split(',') if m.strip()]
+def classify(text: str, biz_type: Optional[str] = None) -> Dict[str, List[str]]:
+    """
+    7차원 태그 분류
+    
+    Args:
+        text: 메뉴 텍스트 (쉼표 구분) 또는 상호명
+        biz_type: 업종 분류 (Optional)
+    
+    Returns:
+        7차원 태그 딕셔너리
+    """
+    # ✅ 빈 값 처리
+    text = text or ''
+    biz_type = biz_type or ''
+    
+    if not text.strip():
+        # 빈 값이면 기본 태그 반환
+        return {
+            'cuisine_tags': ['한식', '한식:일반'],
+            'nutrient_tags': [],
+            'cooking_tags': [],
+            'ingredient_tags': [],
+            'regional_tags': [],
+            'allergen_tags': [],
+            'occasion_tags': [],
+        }
+    
+    # ✅ text 파라미터 사용 (main_menu 아님!)
+    items = [m.strip() for m in text.split(',') if m.strip()]
+    
     cuisine, nutrient, cooking = set(), set(), set()
     ingredient, regional, allergen, occasion = set(), set(), set(), set()
 
@@ -128,9 +165,12 @@ def classify(main_menu: str, biz_type: str) -> dict:
         regional |= _match(REGIONAL_KEYWORDS, it)
         allergen |= _match(ALLERGEN_KEYWORDS, it)
         occasion |= _match(OCCASION_KEYWORDS, it)
+        
+        # 육류 알레르기 추가
         for ing in ings:
             if ing in ('돼지', '소', '닭'):
-                allergen.add('육류'); allergen.add(f'육류:{ing}')
+                allergen.add('육류')
+                allergen.add(f'육류:{ing}')
 
     return {
         'cuisine_tags': sorted(cuisine) or ['한식', '한식:일반'],

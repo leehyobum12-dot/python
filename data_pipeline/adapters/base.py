@@ -1,32 +1,61 @@
 # data_pipeline/adapters/base.py
 import re
 import requests
-from dataclasses import dataclass
+from requests.adapters import HTTPAdapter
+from dataclasses import dataclass, field
 from typing import Optional, List
 from abc import ABC, abstractmethod
 
 
-# ─────────────── 전역 세션 풀 (Connection Pooling) ───────────────
 _session: Optional[requests.Session] = None
 
 
 def get_session() -> requests.Session:
-    """TCP 핸드셰이크 재사용을 위한 싱글톤 세션"""
     global _session
     if _session is None:
         _session = requests.Session()
-        adapter = requests.adapters.HTTPAdapter(
-            pool_connections=20,      # 유지할 커넥션 풀
-            pool_maxsize=50,          # 최대 동시 커넥션
-            max_retries=3,            # urllib3 레벨 자동 재시도
-            pool_block=False,
+        adapter = HTTPAdapter(
+            pool_connections=20, pool_maxsize=50,
+            max_retries=3, pool_block=False,
         )
         _session.mount('http://', adapter)
         _session.mount('https://', adapter)
     return _session
 
 
-# ─────────────── 행정구역 정규화 (2026.7.1 통폐합 대응) ───────────────
+# ─────────────── 주소 판별 유틸리티 ───────────────
+EMD_SUFFIXES = ('동', '읍', '면', '리', '가')
+ROAD_SUFFIXES = ('로', '길', '대로')
+SIGUNGU_SUFFIX = ('시', '군', '구')
+
+
+def is_road_name(token: Optional[str]) -> bool:
+    if not token:
+        return False
+    return any(token.endswith(sf) for sf in ROAD_SUFFIXES)
+
+
+def is_emd_token(token: Optional[str]) -> bool:
+    if not token:
+        return False
+    if is_road_name(token):
+        return False
+    return any(token.endswith(sf) for sf in EMD_SUFFIXES)
+
+
+def extract_emd_from_addr(addr: str) -> str:
+    if not addr:
+        return ''
+    s = re.sub(r'\([^)]*\)', '', addr)
+    toks = s.split()
+    if len(toks) < 3:
+        return ''
+    for tok in toks[2:]:
+        if is_emd_token(tok) and not any(tok.endswith(sf) for sf in SIGUNGU_SUFFIX):
+            return tok
+    return ''
+
+
 PROVINCE_CANON = {
     '광주광역시': '전남광주통합특별시',
     '전라남도': '전남광주통합특별시',
@@ -55,18 +84,21 @@ def canon_province(p: Optional[str]) -> Optional[str]:
 
 
 def match_prefixes(province: str) -> tuple:
-    """startswith/contains용 튜플 (신구 명칭 모두 매칭)"""
     if province == '전남광주통합특별시':
         return ('전남광주통합특별시', '광주광역시', '전라남도')
     return (province,)
 
 
 def parse_addr_tokens(addr: str):
-    """주소 토큰 → (시도[정규화], 시군구, 읍면동)"""
     t = (addr or '').split()
-    return (canon_province(t[0]) if len(t) > 0 else None,
-            t[1] if len(t) > 1 else None,
-            t[2] if len(t) > 2 else None)
+    province = canon_province(t[0]) if len(t) > 0 else None
+    municipality = t[1] if len(t) > 1 else None
+    emd = None
+    if len(t) > 2:
+        candidate = t[2]
+        if is_emd_token(candidate) and not is_road_name(candidate):
+            emd = candidate
+    return (province, municipality, emd)
 
 
 def norm_name(name: str) -> str:
@@ -95,6 +127,11 @@ class CertRecord:
     phone: Optional[str] = None
     biz_type: Optional[str] = None
     main_menu: Optional[str] = None
+    main_menu_source: Optional[str] = None   # public_api|cross_source|naver_api|kakao_api
+    menus: List[str] = field(default_factory=list)   # ✅ [신규] 추가 메뉴 배열
+    menus_source: Optional[str] = None               # ✅ [신규] 메뉴 배열 출처
+    ghost_suspicion_score: int = 0                   # ✅ [신규] 유령 의심 점수 (0~100)
+    coord_confidence: Optional[str] = None           # ✅ [신규] high|medium|low
     designated_at: Optional[str] = None
     cancelled_at: Optional[str] = None
     closed_at: Optional[str] = None

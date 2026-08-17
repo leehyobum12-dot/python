@@ -23,7 +23,8 @@ def find_csv() -> Optional[Path]:
         ROOT_DIR / "data" / "모범음식점정보_2026.csv",
     ]
     for p in candidates:
-        if p.exists(): return p
+        if p.exists():
+            return p
     for d in (PIPE_DIR / "data", ROOT_DIR):
         if d.exists():
             for f in sorted(d.glob("*모범음식점*.csv")):
@@ -51,7 +52,8 @@ class ModelRestaurantAdapter(BaseAdapter):
                     return df
             except (UnicodeDecodeError, pd.errors.ParserError):
                 continue
-        print("⚠️ [model_restaurant] 인코딩/파싱 실패 — 스")
+        # ✅ [수정] 잘린 print문 복원
+        print("⚠️ [model_restaurant] 인코딩/파싱 실패 — 스킵")
         return None
 
     def collect(self, province: Optional[str] = None) -> List[CertRecord]:
