@@ -34,43 +34,86 @@ PROVINCES = [
     "경상북도", "경상남도", "제주특별자치도",
 ]
 
+def _split_menus(record: CertRecord):
+    """main_menu를 1개로 분리, 나머지는 menus[]에 저장"""
+    if not record.main_menu:
+        return
+
+    raw = record.main_menu
+    parts = re.split(r'[,/、]+', raw)
+    parts = [p.strip() for p in parts if p.strip() and len(p.strip()) >= 2]
+
+    if not parts:
+        return
+
+    record.main_menu = parts[0]
+    if len(parts) > 1:
+        existing = set(record.menus or [])
+        for p in parts[1:6]:
+            existing.add(p)
+        record.menus = sorted(existing)
+
+def _extract_menu_from_name(name: str) -> Optional[str]:
+    """상호명에서 메뉴 추출 (예: '올래국수' → '국수', '흑돼지맛집' → '흑돼지')"""
+    if not name:
+        return None
+    
+    # 일반적인 메뉴 패턴
+    patterns = [
+        r'(.+?)전문점',
+        r'(.+?)맛집',
+        r'(.+?)구이',
+        r'(.+?)찌개',
+        r'(.+?)탕',
+        r'(.+?)국수',
+        r'(.+?)냉면',
+        r'(.+?)밥',
+        r'(.+?)집',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, name)
+        if match:
+            extracted = match.group(1).strip()
+            # 너무 짧거나 일반 단어면 스킵
+            if len(extracted) >= 2 and extracted not in ('맛', '참', '진', '옛', '본'):
+                return extracted
+    
+    return None
 
 # ───────────────────────────────────────────────────────────
 # ✅ 대표메뉴 복구 — 공식 소스만 (추측 완전 제거)
 # ───────────────────────────────────────────────────────────
+# pipeline.py — _recover_main_menu 함수 수정
+
 def _recover_main_menu(records: List[CertRecord]) -> int:
-    """
-    대표메뉴 복구 (공식 소스만)
-    ✅ original (공공 API 원본) → source='public_api'
-    ✅ cross (다른 공공 소스) → source='cross_source'
-    ❌ extracted (상호명 추출) 완전 제거
-    ❌ fallback (biz_type 추측) 완전 제거
-    """
+    """대표메뉴 복구 — 교차 소스만 유지"""
     recovered_cross = 0
 
     for r in records:
         if r.main_menu and not r.main_menu_source:
-            r.main_menu_source = 'public_api'
+            r.main_menu_source = 'original'
 
+    # 1단계: 교차 소스 메뉴 복구 (유지)
     menu_map: Dict[str, str] = {}
     for r in records:
         if r.main_menu and r.raw_name and r.raw_address:
-            key = f"{r.raw_name}|{r.raw_address}"
-            existing = menu_map.get(key, '')
-            if len(r.main_menu) > len(existing):
+            key = (r.raw_name.strip(), r.raw_address.strip()[:20])
+            if key not in menu_map or len(r.main_menu) > len(menu_map[key]):
                 menu_map[key] = r.main_menu
 
     for r in records:
         if not r.main_menu and r.raw_name and r.raw_address:
-            key = f"{r.raw_name}|{r.raw_address}"
-            recovered_menu = menu_map.get(key)
-            if recovered_menu:
-                r.main_menu = recovered_menu
+            key = (r.raw_name.strip(), r.raw_address.strip()[:20])
+            if key in menu_map:
+                r.main_menu = menu_map[key]
                 r.main_menu_source = 'cross_source'
                 recovered_cross += 1
 
-    print(f"🍽️ 대표메뉴 복구: 원본 + cross {recovered_cross}건")
-    print(f"   ✅ 추측 메뉴 미적용 (공식 소스만 유지)")
+    # ❌ 2단계 _extract_menu_from_name 완전 삭제 (쓰레기 양산 주범)
+    # 메뉴를 못 찾으면 NULL 유지 (정직한 NULL 원칙)
+
+    print(f"🍽️ 대표메뉴 복구: 교차 {recovered_cross}건")
     return recovered_cross
 
 
@@ -273,6 +316,9 @@ def run_pipeline(province: str = None, output: str = None,
     print("📊 대표메뉴 source 분포:")
     for src, count in source_stats.items():
         print(f"   {src}: {count}건")
+        
+    for r in merged:
+        _split_menus(r)    
 
     for r in merged:
         tags = classify(r.main_menu or r.raw_name or '', r.biz_type or '')

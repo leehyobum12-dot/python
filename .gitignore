@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════
 # Python
 # ═══════════════════════════════════════════════════════════
-__pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -14,63 +14,52 @@ dist/
 # ═══════════════════════════════════════════════════════════
 # 가상 환경
 # ═══════════════════════════════════════════════════════════
-.venv/
-venv/
-ENV/
-env/
+**/.venv/
+**/venv/
+**/ENV/
+**/env/
 
 # ═══════════════════════════════════════════════════════════
 # IDE 및 설정 파일
 # ═══════════════════════════════════════════════════════════
-.vscode/
-.idea/
-pyrightconfig.json
+**/.vscode/
+**/.idea/
+**/pyrightconfig.json
 *.swp
 *.swo
 .DS_Store
 Thumbs.db
 
 # ═══════════════════════════════════════════════════════════
-# 데이터 파일 (CSV, JSON, JSONL)
+# 데이터 파일 (CSV, JSON, JSONL) - 프로젝트 내 모든 해당 확장자 차단
 # ═══════════════════════════════════════════════════════════
 *.csv
 *.jsonl
-food_dictionary.json
-food_names.txt
-food_normalization.json
-integrated_food_names.txt
-filtered_food_names*.txt
-ner_train.json
-ner_val.json
-ner_test.json
-real_data_log.jsonl
+*.json
+*.txt
 
 # ═══════════════════════════════════════════════════════════
-# NER 데이터 폴더
+# 데이터 및 모델 폴더 (구조 변경 대응을 위해 **/ 적용)
 # ═══════════════════════════════════════════════════════════
-data_pipeline/enrich/ner/data/
+**/data_pipeline/enrich/ner/data/
+**/data_pipeline/enrich/ner/models/
+**/data_pipeline/out/
+**/data_pipeline/storage/
+**/data_pipeline/data/raw/
 
 # ═══════════════════════════════════════════════════════════
-# 모델 파일 (대용량)
+# 대용량 모델 및 로그 확장자
 # ═══════════════════════════════════════════════════════════
-data_pipeline/enrich/ner/models/
 *.bin
 *.safetensors
 *.pt
 *.pth
 *.onnx
-
-# ═══════════════════════════════════════════════════════════
-# 출력 폴더
-# ═══════════════════════════════════════════════════════════
-data_pipeline/out/
-data_pipeline/storage/
-data_pipeline/data/raw/
 *.log
 
 # ═══════════════════════════════════════════════════════════
 # 환경 변수 (절대 올리면 안 됨!)
 # ═══════════════════════════════════════════════════════════
-.env
-.env.local
-.env.*.local
+**/.env
+**/.env.local
+**/.env.*.local

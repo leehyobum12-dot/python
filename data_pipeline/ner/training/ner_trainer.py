@@ -27,17 +27,17 @@ from seqeval.metrics import (
     f1_score,
 )
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
-MODEL_DIR = os.path.join(BASE_DIR, 'models')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # training/
+NER_ROOT = os.path.dirname(BASE_DIR)                    # ner/
+DATA_DIR = os.path.join(NER_ROOT, 'data')              # ner/data/
 
-# 데이터 경로
-TRAIN_PATH = os.path.join(DATA_DIR, 'ner_train.json')
-VAL_PATH = os.path.join(DATA_DIR, 'ner_val.json')
-TEST_PATH = os.path.join(DATA_DIR, 'ner_test.json')
+# ✅ 수정: 혼합된 데이터 경로로 변경
+TRAIN_PATH = os.path.join(DATA_DIR, 'training', 'mixed_train.json')
+VAL_PATH = os.path.join(DATA_DIR, 'training', 'ner_val.json')
+TEST_PATH = os.path.join(DATA_DIR, 'training', 'ner_test.json')
 
 # 모델 저장 경로
-MODEL_SAVE_PATH = os.path.join(MODEL_DIR, 'ner_model')
+MODEL_SAVE_PATH = os.path.join(NER_ROOT, 'models', 'ner_model_v2')
 
 # ─────────────── 라벨 정의 ───────────────
 LABEL_LIST = ['O', 'B-STORE', 'I-STORE', 'B-MENU', 'I-MENU']

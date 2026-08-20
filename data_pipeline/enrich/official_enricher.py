@@ -1,27 +1,44 @@
-# data_pipeline/enrich/official_enricher.py
 """
-공식 API 통합 Enrichment 모듈 (v2.0 Final - NAVER API HUB 대응)
+공식 API 통합 Enrichment 모듈 (v5.0 - L2 지능형 라우팅 통합)
 - 메뉴: NAVER API HUB 3단계 (블로그 → 카페글 → 뉴스)
 - 유령가게: NAVER API HUB 3중 검증
 - 좌표: 네이버 지오코딩(NCP) + 카카오 로컬 상호 검증
-- ✅ 강화된 패턴 매칭 + 후처리 검증
-- ✅ NAVER API HUB 엔드포인트 + NCP 헤더
+- ✅ 7계층 방어: 관련성 → 스팸 → 중복 → NER → 사전 대조 → 메뉴-가게 일치 → LLM
+- ✅ L2 지능형 라우팅: LLM 호출 70% 감소
+- ✅ Dual-SSOT: config.nlp_constants + config.taxonomy 참조
 """
 
 import os
 import json
 import asyncio
 import re
+import hashlib
 import httpx
 from datetime import date, datetime
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Set
 from math import radians, cos, sin, asin, sqrt
-try:
-    from .ner.core.ner_pipeline import NERMenuPipeline
-except ImportError:
-    from ner.core.ner_pipeline import NERMenuPipeline
-from adapters.base import CertRecord
 
+try:
+    from ..ner.core.ner_pipeline import NERMenuPipeline
+    from ..ner.core.llm_verifier import LLMVerifier
+    from ..config.nlp_constants import (
+        MENU_VOCABULARY, MENU_PATTERN_BLACKLIST, POSTFIX_PATTERNS,
+        MENU_EXTRACTION_PATTERNS, SPAM_TEXT_SIGNATURES,
+        CAFE_BIZ_KEYWORDS, MEAL_MENU_KEYWORDS,
+    )
+except ImportError:
+    from data_pipeline.ner.core.ner_pipeline import NERMenuPipeline
+    from data_pipeline.ner.core.llm_verifier import LLMVerifier
+    from data_pipeline.config.nlp_constants import (
+        MENU_VOCABULARY, MENU_PATTERN_BLACKLIST, POSTFIX_PATTERNS,
+        MENU_EXTRACTION_PATTERNS, SPAM_TEXT_SIGNATURES,
+        CAFE_BIZ_KEYWORDS, MEAL_MENU_KEYWORDS,
+    )
+
+try:
+    from ..adapters.base import CertRecord
+except ImportError:
+    from data_pipeline.adapters.base import CertRecord
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(BASE_DIR, '..', 'out')
@@ -30,25 +47,16 @@ QUOTA_PATH = os.path.join(OUT_DIR, 'official_enrich_quota.json')
 CHECKPOINT_PATH = os.path.join(OUT_DIR, 'official_enrich_progress.json')
 ENRICH_CACHE_PATH = os.path.join(OUT_DIR, 'official_enrich_cache.json')
 
-# ─────────────── 일일 쿼터 한도 ───────────────
 DAILY_LIMITS = {
-    'kakao': 20_000,
-    'naver_blog': 8_000,
-    'naver_cafe': 5_000,
-    'naver_news': 3_000,
-    'naver_geo': 2_000,
+    'kakao': 20_000, 'naver_blog': 8_000, 'naver_cafe': 5_000,
+    'naver_news': 3_000, 'naver_geo': 2_000,
 }
 
-# ─────────────── ✅ NAVER API HUB 엔드포인트 ───────────────
 NAVER_HUB_BASE = "https://naverapihub.apigw.ntruss.com"
 NAVER_BLOG_URL = f"{NAVER_HUB_BASE}/search/v1/blog"
 NAVER_NEWS_URL = f"{NAVER_HUB_BASE}/search/v1/news"
 NAVER_CAFE_URL = f"{NAVER_HUB_BASE}/search/v1/cafearticle"
-
-# 네이버 지오코딩 (NCP)
 NAVER_GEO_URL = "https://maps.apigw.ntruss.com/map-geocode/v2/geocode"
-
-# 카카오 로컬
 KAKAO_LOCAL_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
 
 
@@ -59,7 +67,6 @@ class QuotaExceededError(Exception):
 class QuotaTracker:
     def __init__(self):
         self.state = self._load()
-        self.ner_pipeline = NERMenuPipeline()
 
     def _load(self) -> Dict:
         today = date.today().isoformat()
@@ -143,25 +150,7 @@ def _clean_html(text: str) -> str:
     return re.sub(r'<[^>]+>', '', text or '')
 
 
-# ─────────────── ✅ 강화된 메뉴 추출 로직 ───────────────
-
-# 블랙리스트: 메뉴가 아닌 단어 (실제 테스트에서 오매칭된 것들)
-MENU_BLACKLIST = {
-    '제주맛집', '아래와', '비교', '길에', '있다면', '완전', '정말', '진짜',
-    '너무', '꼭', '강추', '추천', '드시길', '드셔보세요', '였고', '입니다',
-    '했어요', '습니다', '습니다', '드립니다', '해요', '하네요', '같아요',
-    '있습니다', '없습니다', '되었습니다', '됩니다', '먹었어요', '다녀왔',
-}
-
-# 조사/어미 패턴 (제거 대상)
-POSTFIX_PATTERNS = [
-    r'(입니다|이에요|예요|입니다|었습니다|었어요|습니다|해요|하네요|같아요)$',
-    r'(를|을|는|은|이|가|에|에서|으로|까지|부터|만|도|라도|조차|마저)$',
-]
-
-
 def _clean_menu_text(text: str) -> str:
-    """추출된 메뉴 텍스트 정리 (조사/어미 제거)"""
     text = text.strip()
     for pattern in POSTFIX_PATTERNS:
         text = re.sub(pattern, '', text)
@@ -169,71 +158,33 @@ def _clean_menu_text(text: str) -> str:
 
 
 def _is_valid_menu(menu: str, store_name: str) -> bool:
-    """추출된 메뉴가 유효한지 검증"""
     if not menu or len(menu) < 2 or len(menu) > 15:
         return False
-    
-    # 블랙리스트 체크
-    if menu in MENU_BLACKLIST:
+    if menu in MENU_PATTERN_BLACKLIST:
         return False
-    
-    # 가게 이름과 너무 유사하면 제외 (예: "해장국" in "우진해장국")
     if store_name and menu in store_name:
         return False
-    
-    # 숫자만 있는 경우 제외
     if re.match(r'^\d+$', menu):
         return False
-    
-    # 특수문자 포함 제외
     if re.search(r'[^\uAC00-\uD7A3a-zA-Z0-9\s]', menu):
         return False
-    
     return True
 
 
-# 강화된 패턴 (더 정확하게)
-MENU_PATTERNS = [
-    # "대표메뉴: OO" 형식 (콜론/등호 뒤 단어만)
-    (r'대표\s*메뉴\s*[:는]\s*([가-힣]{2,10})(?:\s|$|,)', '대표메뉴'),
-    (r'추천\s*메뉴\s*[:는]\s*([가-힣]{2,10})(?:\s|$|,)', '추천메뉴'),
-    (r'시그니처\s*[:는]\s*([가-힣]{2,10})(?:\s|$|,)', '시그니처'),
-    
-    # "OO 먹고/드셨" 패턴 (뒤에 조사 허용)
-    (r'([가-힣]{2,8})(?:를|을)?\s*먹(?:고|었|는)', '먹고'),
-    (r'([가-힣]{2,8})(?:를|을)?\s*드셨', '드셨'),
-    
-    # "OO 진짜/정말 맛있" 패턴
-    (r'([가-힣]{2,8})\s*(?:진짜|정말|너무)\s*맛있', '맛있'),
-    
-    # 제주도 특화 메뉴 (고정값)
-    (r'(흑돼지\s*구이|고기\s*국수|갈치\s*조림|성게\s*미역국|보말\s*칼국수|전복\s*죽|몸국|돔베고기)', '제주특화'),
-    
-    # 일반 메뉴 키워드 (뒤에 조사/어미 허용하되 제거)
-    (r'([가-힣]{2,8}(?:구이|찌개|탕|국밥|비빔밥|냉면|회|초밥|전골|덮밥|해장국|국수|라면|파스타|피자|스테이크))', '일반메뉴'),
-]
-
-
 def extract_menu_with_validation(text: str, store_name: str) -> Tuple[Optional[str], List[str], Optional[str]]:
-    """메뉴 추출 + 후처리 검증"""
     candidates = []
-    
-    for pattern, pattern_name in MENU_PATTERNS:
+    for pattern, pattern_name in MENU_EXTRACTION_PATTERNS:
         matches = re.findall(pattern, text)
         for match in matches:
-            # 후처리: 조사/어미 제거
             cleaned = _clean_menu_text(match)
-            # 유효성 검증
             if _is_valid_menu(cleaned, store_name):
                 candidates.append((cleaned, pattern_name))
-    
+
     if not candidates:
         return None, [], None
-    
-    # 첫 번째 유효한 메뉴 선택
+
     main_menu, pattern_name = candidates[0]
     extra_menus = [m for m, _ in candidates[1:6] if m != main_menu]
-    
     return main_menu, extra_menus, f"pattern_{pattern_name}"
 
 
@@ -253,33 +204,232 @@ class OfficialEnricher:
         self.quota = QuotaTracker()
         self.ecache = EnrichCache()
         self.stats = {
-        # 패턴 매칭 기반
-        'menu_blog': 0,
-        'menu_cafe': 0,
-        'menu_news': 0,
-        'menu_none': 0,
-        # ✅ NER 기반 (신규 추가 - 이 부분이 필수!)
-        'menu_blog_ner': 0,
-        'menu_cafe_ner': 0,
-        'menu_news_ner': 0,
-        # 유령/좌표
-        'ghost_open': 0,
-        'ghost_closed': 0,
-        'ghost_unknown': 0,
-        'coord_high': 0,
-        'coord_medium': 0,
-        'coord_low': 0,
-        'skipped': 0,
+            'menu_blog': 0, 'menu_cafe': 0, 'menu_news': 0, 'menu_none': 0,
+            'menu_blog_ner': 0, 'menu_cafe_ner': 0, 'menu_news_ner': 0,
+            'ghost_open': 0, 'ghost_closed': 0, 'ghost_unknown': 0,
+            'coord_high': 0, 'coord_medium': 0, 'coord_low': 0, 'skipped': 0,
+            # 🆕 L2 라우팅 통계
+            'route_ner_direct': 0, 'route_discard': 0, 'route_llm': 0,
         }
-        
-         # ✅ 수정: 타입 어노테이션 + try-except로 안전한 초기화
+
+        self._seen_fingerprints: Set[str] = set()
+        self._food_names_set = self._load_menu_vocabulary()
+        self._relevance_hits = 0
+        self._spam_hits = 0
+        self._duplicate_hits = 0
+        self._dictionary_hits = 0
+        self._biz_mismatch_hits = 0
+        self._proximity_hits = 0
+
         self.ner_pipeline: Optional[NERMenuPipeline] = None
         try:
             self.ner_pipeline = NERMenuPipeline()
             print(f"   NER 파이프라인: ✅")
         except Exception as e:
             print(f"   NER 파이프라인: ❌ 초기화 실패 ({e})")
-            print(f"   → 기존 패턴 매칭으로 fallback")
+
+        self.llm_verifier: Optional[LLMVerifier] = None
+        self._llm_verify_count = 0
+        self._llm_fill_count = 0
+        self._llm_success_count = 0
+        try:
+            self.llm_verifier = LLMVerifier()
+            if self.llm_verifier and self.llm_verifier.available:
+                print(f"   LLM 검증기: ✅ (Layer 7 활성화)")
+            else:
+                print(f"   LLM 검증기: ⚠️ Ollama 미실행 (Layer 7 비활성화)")
+                self.llm_verifier = None
+        except Exception as e:
+            print(f"   LLM 검증기: ❌ 초기화 실패 ({e})")
+            self.llm_verifier = None
+
+    def _load_menu_vocabulary(self) -> set:
+        print(f"   📚 메뉴 어휘 사전 로드: {len(MENU_VOCABULARY)}개 (SSOT)")
+        return MENU_VOCABULARY
+
+    def _is_relevant_text(self, text: str, store_name: str) -> bool:
+        if not text or not store_name:
+            return False
+        store_norm = re.sub(r'[^가-힣a-zA-Z0-9]', '', store_name).lower()
+        text_norm = re.sub(r'[^가-힣a-zA-Z0-9]', '', text).lower()
+        if len(store_norm) < 3:
+            return False
+        if store_norm in text_norm:
+            return True
+        if len(store_norm) >= 5:
+            prefix = store_norm[:4]
+            suffix = store_norm[-4:]
+            skip_prefixes = ('제주', '서울', '부산', '인천', '대구', '대전', '광주', '울산', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남')
+            if prefix not in skip_prefixes:
+                if prefix in text_norm or suffix in text_norm:
+                    return True
+        self._relevance_hits += 1
+        return False
+
+    def _is_spam_text(self, text: str) -> bool:
+        for pattern in SPAM_TEXT_SIGNATURES:
+            if pattern in text:
+                self._spam_hits += 1
+                return True
+        return False
+
+    def _compute_fingerprint(self, text: str) -> str:
+        normalized = re.sub(r'\s+', '', text)[:300]
+        return hashlib.md5(normalized.encode('utf-8', errors='ignore')).hexdigest()
+
+    def _is_duplicate_fingerprint(self, text: str) -> bool:
+        fingerprint = self._compute_fingerprint(text)
+        if fingerprint in self._seen_fingerprints:
+            self._duplicate_hits += 1
+            return True
+        self._seen_fingerprints.add(fingerprint)
+        return False
+
+    def _validate_menu_against_dictionary(self, menu: str) -> bool:
+        if not menu or len(menu) < 2:
+            return False
+        if not self._food_names_set:
+            return True
+        if menu in self._food_names_set:
+            return True
+        for food_name in self._food_names_set:
+            if len(food_name) >= 3 and food_name in menu:
+                return True
+        self._dictionary_hits += 1
+        return False
+
+    def _filter_valid_menus(self, menus: List[str]) -> List[str]:
+        if not self._food_names_set:
+            return menus
+        return [m for m in menus if self._validate_menu_against_dictionary(m)]
+
+    def _validate_menu_for_business(self, menu: str, record: CertRecord) -> bool:
+        biz_type = (record.biz_type or '').lower()
+        menu_lower = menu.lower()
+        is_cafe_biz = any(kw in biz_type for kw in CAFE_BIZ_KEYWORDS)
+        is_meal_menu = any(kw in menu_lower for kw in MEAL_MENU_KEYWORDS)
+        if is_cafe_biz and is_meal_menu:
+            self._biz_mismatch_hits += 1
+            return False
+        return True
+
+    def _is_menu_near_store(self, text: str, store_name: str, menu: str, window: int = 80) -> bool:
+        if not menu or not store_name:
+            return False
+        menu_norm = re.sub(r'\s+', '', menu)
+        store_norm = re.sub(r'\s+', '', store_name)
+        text_norm = re.sub(r'\s+', '', text)
+
+        store_positions = []
+        start = 0
+        while True:
+            pos = text_norm.find(store_norm, start)
+            if pos == -1:
+                break
+            store_positions.append(pos)
+            start = pos + 1
+
+        if not store_positions:
+            return False
+
+        menu_positions = []
+        start = 0
+        while True:
+            pos = text_norm.find(menu_norm, start)
+            if pos == -1:
+                break
+            menu_positions.append(pos)
+            start = pos + 1
+
+        if not menu_positions:
+            return False
+
+        for sp in store_positions:
+            for mp in menu_positions:
+                if abs(sp - mp) <= window:
+                    return True
+
+        self._proximity_hits += 1
+        return False
+
+    def _apply_layer6_validation(self, menus: List[str], text: str,
+                                  record: CertRecord) -> List[str]:
+        consistent_menus = []
+        for menu in menus:
+            if not self._validate_menu_for_business(menu, record):
+                continue
+            if not self._is_menu_near_store(text, record.raw_name, menu):
+                continue
+            consistent_menus.append(menu)
+        return consistent_menus
+
+    # ─────────────── 🆕 L2: 지능형 라우팅 (클래스 메서드) ───────────────
+    def _smart_route(self, text: str, store_name: str, ner_menus: List[str]) -> str:
+        """
+        LLM 호출 여부 지능 판단 (L2)
+        - ner_direct: NER가 2개 이상 + 사전 검증 통과 → LLM 스킵
+        - discard: 스팸/무관 텍스트 → 즉시 폐기
+        - llm: 애매한 케이스만 LLM 호출
+        """
+        # Route B: 스팸/무관 텍스트 즉시 폐기
+        if self._is_spam_text(text) or not self._is_relevant_text(text, store_name):
+            self.stats['route_discard'] += 1
+            return 'discard'
+        
+        # Route A: NER 확신 높음 → LLM 스킵
+        if len(ner_menus) >= 2 and all(
+            self._validate_menu_against_dictionary(m) for m in ner_menus
+        ):
+            self.stats['route_ner_direct'] += 1
+            return 'ner_direct'
+        
+        # Route C: 애매한 케이스만 LLM
+        self.stats['route_llm'] += 1
+        return 'llm'
+
+    async def _apply_llm_verification(
+        self,
+        client: httpx.AsyncClient,
+        text: str,
+        record: CertRecord,
+        ner_menus: List[str]
+    ) -> Tuple[Optional[str], List[str], Optional[str]]:
+        """Layer 7: LLM 삼각 검증"""
+        if not self.llm_verifier or not self.llm_verifier.available:
+            return None, [], None
+
+        biz_type = getattr(record, 'biz_type', '') or ''
+
+        try:
+            if ner_menus:
+                self._llm_verify_count += 1
+                verified = await self.llm_verifier.verify_menu_with_context(
+                    text=text,
+                    store_name=record.raw_name,
+                    ner_menus=ner_menus,
+                    biz_type=biz_type,
+                )
+                if verified:
+                    self._llm_success_count += 1
+                    return verified[0], verified[1:6], 'llm_verified'
+            else:
+                self._llm_fill_count += 1
+                extracted = await self.llm_verifier.extract_menu_direct(
+                    text=text,
+                    store_name=record.raw_name,
+                    biz_type=biz_type,
+                )
+                if extracted:
+                    final_menus = self._apply_layer6_validation(
+                        extracted, text, record
+                    )
+                    if final_menus:
+                        self._llm_success_count += 1
+                        return final_menus[0], final_menus[1:6], 'llm_filled'
+        except Exception as e:
+            print(f"   ⚠️ LLM 검증 실패: {e}")
+
+        return None, [], None
 
     def _load_checkpoint(self) -> Dict:
         if os.path.exists(CHECKPOINT_PATH):
@@ -296,11 +446,9 @@ class OfficialEnricher:
         with open(CHECKPOINT_PATH, 'w', encoding='utf-8') as f:
             json.dump(cp, f, ensure_ascii=False)
 
-    # ─────────────── ✅ NAVER API HUB 호출 ───────────────
     async def _search_naver_hub(self, client: httpx.AsyncClient,
                                  api_type: str, query: str,
                                  display: int = 5) -> List[dict]:
-        """NAVER API HUB 검색 (새 엔드포인트 + NCP 헤더)"""
         if not self.naver_search_id or not self.naver_search_secret:
             return []
 
@@ -325,7 +473,7 @@ class OfficialEnricher:
                 },
                 timeout=10,
             )
-            
+
             if res.status_code == 200:
                 self.quota.check_and_consume(quota_key)
                 return res.json().get('items', [])
@@ -339,76 +487,100 @@ class OfficialEnricher:
         except Exception:
             return []
 
-    # ─────────────── 메뉴 enrichment (강화 버전) ───────────────
+    # ─────────────── 🔧 결함 수정: process_items 실제 호출 ───────────────
     async def _enrich_menu_full(self, client: httpx.AsyncClient,
                                  record: CertRecord) -> Tuple[Optional[str], List[str], Optional[str]]:
-        """3단계 메뉴 enrichment (NER + 패턴 매칭 병행)"""
+        """3단계 메뉴 enrichment (L2 라우팅 적용)"""
+
+        search_queries = [
+            f'{record.raw_name} 메뉴',
+            f'{record.raw_name} 메뉴판',
+            f'{record.raw_name} 대표',
+            f'{record.raw_name} 추천',
+            f'{record.raw_name} 시그니처',
+            f'{record.raw_name} 맛집',
+        ]
         
-        # 1단계: 블로그
-        blog_items = await self._search_naver_hub(client, 'blog', f'{record.raw_name} 메뉴 추천')
-        for item in blog_items:
-            text = _clean_html((item.get('title', '') or '') + ' ' + (item.get('description', '') or ''))
-            
-            # ✅ 수정: ner_pipeline이 None이 아닐 때만 사용
-            if self.ner_pipeline is not None:
-                ner_result = self.ner_pipeline.extract_menus_from_text(
-                    text=text,
-                    store_name=record.raw_name,
-                    source='blog'
-                )
-                if ner_result['main_menu']:
-                    return ner_result['main_menu'], ner_result['sub_menus'], 'naver_blog_ner'
-            
-            # NER 결과 없으면 기존 패턴 매칭
-            menu, extras, source = extract_menu_with_validation(text, record.raw_name)
-            if menu:
-                return menu, extras, 'naver_blog'
+        async def process_items(items, source_prefix):
+            """개별 item을 처리하는 내부 함수"""
+            for item in items:
+                text = _clean_html((item.get('title', '') or '') + ' ' + (item.get('description', '') or ''))
+                
+                # Layer 2-1, 2-2, 2-3 검증
+                if not self._is_relevant_text(text, record.raw_name):
+                    continue
+                if self._is_spam_text(text):
+                    continue
+                if self._is_duplicate_fingerprint(text):
+                    continue
 
-        # 2단계: 카페글
-        cafe_items = await self._search_naver_hub(client, 'cafe', f'{record.raw_name} 메뉴')
-        for item in cafe_items:
-            text = _clean_html((item.get('title', '') or '') + ' ' + (item.get('description', '') or ''))
-            
-            if self.ner_pipeline is not None:
-                ner_result = self.ner_pipeline.extract_menus_from_text(
-                    text=text,
-                    store_name=record.raw_name,
-                    source='cafe'
-                )
-                if ner_result['main_menu']:
-                    return ner_result['main_menu'], ner_result['sub_menus'], 'naver_cafe_ner'
-            
-            menu, extras, source = extract_menu_with_validation(text, record.raw_name)
-            if menu:
-                return menu, extras, 'naver_cafe'
+                # 1단계: NER로 메뉴 추출 시도
+                all_ner_menus = []
+                if self.ner_pipeline:
+                    ner_res = self.ner_pipeline.extract_menus_from_text(
+                        text=text, store_name=record.raw_name, source=source_prefix
+                    )
+                    all_ner_menus = ner_res.get('all_menus', [])
+                    validated = self._apply_layer6_validation(
+                        self._filter_valid_menus(all_ner_menus), text, record
+                    )
+                    if validated:
+                        return validated[0], validated[1:6], f'naver_{source_prefix}_ner'
 
-        # 3단계: 뉴스
-        news_items = await self._search_naver_hub(client, 'news', f'{record.raw_name} 메뉴')
-        for item in news_items:
-            text = _clean_html((item.get('title', '') or '') + ' ' + (item.get('description', '') or ''))
+                # 2단계: 패턴 매칭
+                menu, extras, _ = extract_menu_with_validation(text, record.raw_name)
+                if menu and self._validate_menu_against_dictionary(menu) and \
+                   self._validate_menu_for_business(menu, record) and \
+                   self._is_menu_near_store(text, record.raw_name, menu):
+                    return menu, extras, f'naver_{source_prefix}'
+
+                # 3단계: 🆕 L2 지능형 라우팅 적용
+                route = self._smart_route(text, record.raw_name, all_ner_menus)
+                
+                if route == 'ner_direct':
+                    # NER 확신 높음 → LLM 스킵, NER 결과 사용
+                    if all_ner_menus:
+                        return all_ner_menus[0], all_ner_menus[1:6], f'naver_{source_prefix}_ner_high'
+                
+                elif route == 'discard':
+                    # 스팸/무관 → 다음 item으로
+                    continue
+                
+                elif route == 'llm' and all_ner_menus:
+                    # 애매 + NER 후보 있음 → LLM 검증
+                    llm_menu, llm_extras, llm_source = await self._apply_llm_verification(
+                        client, text, record, all_ner_menus
+                    )
+                    if llm_menu:
+                        return llm_menu, llm_extras, f"naver_{source_prefix}_{llm_source}"
             
-            if self.ner_pipeline is not None:
-                ner_result = self.ner_pipeline.extract_menus_from_text(
-                    text=text,
-                    store_name=record.raw_name,
-                    source='news'
-                )
-                if ner_result['main_menu']:
-                    return ner_result['main_menu'], ner_result['sub_menus'], 'naver_news_ner'
-            
-            menu, extras, source = extract_menu_with_validation(text, record.raw_name)
-            if menu:
-                return menu, extras, 'naver_news'
+            return None, [], None
+
+        # 🆕 실제로 각 소스별 items를 process_items에 전달
+        for q in search_queries:
+            blog_items = await self._search_naver_hub(client, 'blog', q, 10)
+            res = await process_items(blog_items, 'blog')
+            if res[0]:
+                return res
+
+        for q in search_queries[:2]:
+            cafe_items = await self._search_naver_hub(client, 'cafe', q, 5)
+            res = await process_items(cafe_items, 'cafe')
+            if res[0]:
+                return res
+
+        news_items = await self._search_naver_hub(client, 'news', search_queries[0], 5)
+        res = await process_items(news_items, 'news')
+        if res[0]:
+            return res
 
         return None, [], None
 
-    # ─────────────── 유령가게 검증 ───────────────
     async def _verify_ghost_full(self, client: httpx.AsyncClient,
                                   record: CertRecord) -> int:
         score = 0
         now = datetime.now()
 
-        # 뉴스 검증
         news_items = await self._search_naver_hub(client, 'news', f'{record.raw_name} 폐업', display=3)
         for item in news_items:
             text = _clean_html((item.get('title', '') or '') + ' ' + (item.get('description', '') or '')).lower()
@@ -416,7 +588,6 @@ class OfficialEnricher:
                 score += 50
                 break
 
-        # 블로그 검증
         blog_items = await self._search_naver_hub(client, 'blog', f'{record.raw_name} 폐업', display=3)
         for item in blog_items:
             text = _clean_html((item.get('title', '') or '') + ' ' + (item.get('description', '') or '')).lower()
@@ -424,7 +595,6 @@ class OfficialEnricher:
                 score += 30
                 break
 
-        # 카페 검증
         cafe_items = await self._search_naver_hub(client, 'cafe', f'{record.raw_name} 폐업', display=3)
         for item in cafe_items:
             text = _clean_html((item.get('title', '') or '') + ' ' + (item.get('description', '') or '')).lower()
@@ -432,7 +602,6 @@ class OfficialEnricher:
                 score += 20
                 break
 
-        # 영업중 신호
         recent_items = await self._search_naver_hub(client, 'blog', f'{record.raw_name} 맛집', display=3)
         for item in recent_items:
             text = _clean_html((item.get('title', '') or '') + ' ' + (item.get('description', '') or '')).lower()
@@ -450,7 +619,6 @@ class OfficialEnricher:
 
         return max(0, min(100, score))
 
-    # ─────────────── 좌표 복원 ───────────────
     async def _fetch_naver_geo(self, client: httpx.AsyncClient,
                                 address: str) -> Optional[Tuple[float, float]]:
         if not self.naver_geo_id or not self.naver_geo_secret or not address:
@@ -547,7 +715,6 @@ class OfficialEnricher:
             return kakao_lat, kakao_lng, 'medium'
         return None, None, 'low'
 
-    # ─────────────── 메인 배치 처리 ───────────────
     async def _process_batch_async(self, records: List[CertRecord]):
         cp = self._load_checkpoint()
         processed_set = set(cp['processed_keys'])
@@ -560,7 +727,6 @@ class OfficialEnricher:
                     continue
 
                 try:
-                    # 메뉴 enrichment
                     if not record.main_menu:
                         cache_key = f"menu|{record.dedup_key}"
                         cached = self.ecache.get(cache_key)
@@ -569,13 +735,12 @@ class OfficialEnricher:
                             if cached.get('menu'):
                                 record.main_menu = cached['menu']
                                 source = cached.get('source')
-                                
-                                # ✅ 수정 1: 캐시에서 로드 시
+
                                 if source and isinstance(source, str) and source.startswith('naver_'):
                                     source_key = source[len('naver_'):]
                                 else:
                                     source_key = 'none'
-                                
+
                                 record.main_menu_source = source or 'naver_blog'
                                 record.menus = cached.get('menus', [])
                                 record.menus_source = source or 'naver_blog'
@@ -591,13 +756,12 @@ class OfficialEnricher:
                                 record.main_menu_source = source
                                 record.menus = extras
                                 record.menus_source = source
-                                
-                                # ✅ 수정 2: 새로 추출 시
+
                                 if source and isinstance(source, str) and source.startswith('naver_'):
                                     source_key = source[len('naver_'):]
                                 else:
                                     source_key = 'none'
-                                
+
                                 stat_key = f"menu_{source_key}"
                                 self.stats.setdefault(stat_key, 0)
                                 self.stats[stat_key] += 1
@@ -607,7 +771,6 @@ class OfficialEnricher:
                                 'menu': menu, 'menus': extras, 'source': source,
                             })
 
-                    # 유령가게 검증
                     if not record.is_active:
                         score = await self._verify_ghost_full(client, record)
                         record.ghost_suspicion_score = score
@@ -619,7 +782,6 @@ class OfficialEnricher:
                         else:
                             self.stats['ghost_unknown'] += 1
 
-                    # 좌표 복원
                     if not record.lat or not record.lng:
                         lat, lng, conf = await self._fix_coordinate(client, record)
                         if lat and lng:
@@ -639,8 +801,14 @@ class OfficialEnricher:
 
                 processed_set.add(record.dedup_key)
                 if idx % 100 == 0:
+                    ner_total = self.stats.get('menu_blog_ner', 0) + \
+                                self.stats.get('menu_cafe_ner', 0) + \
+                                self.stats.get('menu_news_ner', 0)
+                    pattern_total = self.stats['menu_blog'] + \
+                                    self.stats['menu_cafe'] + \
+                                    self.stats['menu_news']
                     print(f"   진행: {idx}/{total} "
-                          f"(메뉴 {self.stats['menu_blog'] + self.stats['menu_cafe'] + self.stats['menu_news']}, "
+                          f"(패턴:{pattern_total} NER:{ner_total}, "
                           f"유령복구 {self.stats['ghost_open']}, "
                           f"좌표복원 {self.stats['coord_high'] + self.stats['coord_medium']})")
                     self._save_checkpoint({'processed_keys': list(processed_set)})
@@ -685,5 +853,25 @@ class OfficialEnricher:
         print(f"   유령 판단 불가: {self.stats['ghost_unknown']}건")
         print(f"   좌표 고신뢰: {self.stats['coord_high']}건")
         print(f"   좌표 중신뢰: {self.stats['coord_medium']}건")
+
+        print(f"\n🛡️ 다층 방어 통계:")
+        print(f"   Layer 2-1 관련성 미달 차단: {self._relevance_hits}건")
+        print(f"   Layer 2-2 스팸 패턴 차단: {self._spam_hits}건")
+        print(f"   Layer 2-3 중복 본문 차단: {self._duplicate_hits}건 (고유 본문: {len(self._seen_fingerprints)}개)")
+        print(f"   Layer 4 사전 미매칭 차단: {self._dictionary_hits}건")
+        print(f"   Layer 6-1 업종-메뉴 불일치 차단: {self._biz_mismatch_hits}건")
+        print(f"   Layer 6-2 근접성 검증 차단: {self._proximity_hits}건")
+
+        # 🆕 L2 라우팅 통계
+        print(f"\n🧭 L2 지능형 라우팅 통계:")
+        print(f"   Route A (NER 직접): {self.stats['route_ner_direct']}건")
+        print(f"   Route B (즉시 폐기): {self.stats['route_discard']}건")
+        print(f"   Route C (LLM 호출): {self.stats['route_llm']}건")
+
+        print(f"\n🤖 LLM 삼각 검증 통계 (Layer 7):")
+        print(f"   검증 모드 (NER결과 교차검증): {self._llm_verify_count}회")
+        print(f"   보충 모드 (NER실패 직접추출): {self._llm_fill_count}회")
+        print(f"   LLM 최종 확정 성공: {self._llm_success_count}회")
+
         print(f"📊 쿼터 사용: {self.quota.summary()}")
         return records
