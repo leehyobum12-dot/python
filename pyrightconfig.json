@@ -1,0 +1,67 @@
+{
+  "include": [
+    "src",
+    "flows",
+    "tests",
+    "scripts"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/.*",
+    "**/.venv",
+    "**/venv",
+    "**/__pycache__",
+    "**/build",
+    "**/dist",
+    "**/data",
+    "**/*.egg-info"
+  ],
+  "extraPaths": [
+    "./src"
+  ],
+  "typeCheckingMode": "standard",
+  "pythonVersion": "3.12",
+  "pythonPlatform": "All",
+  
+  "reportMissingImports": "error",
+  "reportMissingTypeStubs": "warning",
+  "reportUnusedImport": "warning",
+  "reportUnusedVariable": "warning",
+  "reportDuplicateImport": "error",
+  "reportOptionalMemberAccess": "warning",
+  "reportOptionalSubscript": "warning",
+  "reportOptionalCall": "warning",
+  "reportArgumentType": "warning",
+  "reportAttributeAccessIssue": "warning",
+  "reportIncompatibleVariableOverride": "error",
+  "reportIncompatibleMethodOverride": "error",
+  "reportInvalidTypeVarUse": "error",
+  "reportMissingParameterType": "warning",
+  "reportUnknownParameterType": "warning",
+  "reportUnknownArgumentType": "warning",
+  "reportUnknownMemberType": "warning",
+  "reportUnknownVariableType": "warning",
+  
+  "strictListInference": true,
+  "strictDictionaryInference": true,
+  "strictSetInference": true,
+  
+  "executionEnvironments": [
+    {
+      "root": "src",
+      "extraPaths": ["./src"]
+    },
+    {
+      "root": "flows",
+      "extraPaths": ["./src"]
+    },
+    {
+      "root": "tests",
+      "extraPaths": ["./src"]
+    },
+    {
+      "root": "scripts",
+      "extraPaths": ["./src"]
+    }
+  ]
+}

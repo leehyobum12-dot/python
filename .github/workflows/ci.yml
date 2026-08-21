@@ -1,0 +1,150 @@
+# ============================================================
+# 바른인증식당 데이터 파이프라인 CI 워크플로우
+# ============================================================
+# 트리거:
+# - main 브랜치 push
+# - PR 생성/업데이트
+#
+# 단계:
+# 1. Linting (ruff)
+# 2. Type Checking (pyright)
+# 3. Testing (pytest + coverage)
+# ============================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# 동시 실행 방지 (같은 PR의 이전 실행 취소)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ───────────────────────────────────────────────
+  # Job 1: Linting (ruff)
+  # ───────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff (lint)
+        run: ruff check src/bareun_pipeline/
+
+      - name: Run ruff (format check)
+        run: ruff format --check src/bareun_pipeline/
+
+  # ───────────────────────────────────────────────
+  # Job 2: Type Checking (pyright)
+  # ───────────────────────────────────────────────
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run pyright
+        run: pyright src/bareun_pipeline/
+
+  # ───────────────────────────────────────────────
+  # Job 3: Testing (Python 버전 매트릭스)
+  # ───────────────────────────────────────────────
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run pytest with coverage
+        run: pytest --cov=src/bareun_pipeline --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+        continue-on-error: true
+
+      - name: Upload coverage HTML artifact
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: htmlcov/
+          retention-days: 7
+
+  # ───────────────────────────────────────────────
+  # Job 4: Security Scan (선택적)
+  # ───────────────────────────────────────────────
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install bandit
+        run: pip install bandit
+
+      - name: Run bandit (security scan)
+        run: bandit -r src/bareun_pipeline/ -f txt -o bandit-report.txt || true
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: bandit-report.txt
+          retention-days: 30
