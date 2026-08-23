@@ -3,23 +3,18 @@
 ==============
 공공데이터 원본 수집을 담당하는 어댑터 모듈입니다.
 
-각 어댑터는 BaseAdapter를 상속하며, 다음을 구현해야 합니다:
-- source: 어댑터 식별자
-- cert_type: 인증 타입
-- pii_fields: PII 필드 집합 (마스킹용)
-- collect(): 데이터 수집 메서드
-
-모듈:
+즉시 노출 (가벼운 모듈):
 - base: BaseAdapter 추상 클래스 + 주소 유틸리티
-- safe_restaurant: 농식품부 안심식당
-- low_sodium: 나트륨 줄이기 실천음식점
-- food_safety: 식품안심업소(위생등급)
-- model_restaurant: 모범음식점
-- tourist_info: 한국관광공사 국문 관광정보 서비스
-- general_restaurant: 행정안전부 일반음식점 조회서비스
+
+Lazy 노출 (무거운 모듈):
+- 각 어댑터 클래스 (외부 API 클라이언트 및 무거운 매핑 로직 포함)
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+import importlib
+
+# 가벼운 Base 클래스 및 유틸리티는 즉시 노출
 from .base import (
     BaseAdapter,
     CircuitBreaker,
@@ -35,16 +30,7 @@ from .base import (
     norm_addr,
 )
 
-
-def get_all_adapters() -> list[type]:
-    """
-    모든 어댑터 클래스 목록 반환
-
-    지연 import를 사용하여 순환 import 방지
-
-    Returns:
-        어댑터 클래스 목록
-    """
+if TYPE_CHECKING:
     from .safe_restaurant import SafeRestaurantAdapter
     from .low_sodium import LowSodiumAdapter
     from .food_safety import FoodSafetyAdapter
@@ -52,30 +38,46 @@ def get_all_adapters() -> list[type]:
     from .tourist_info import TouristInfoAdapter
     from .general_restaurant import GeneralRestaurantAdapter
 
-    return [
-        SafeRestaurantAdapter,
-        LowSodiumAdapter,
-        FoodSafetyAdapter,
-        ModelRestaurantAdapter,
-        TouristInfoAdapter,
-        GeneralRestaurantAdapter,
-    ]
+_LAZY_ADAPTERS: dict[str, tuple[str, str]] = {
+    'SafeRestaurantAdapter': ('bareun_pipeline.adapters.safe_restaurant', 'SafeRestaurantAdapter'),
+    'LowSodiumAdapter': ('bareun_pipeline.adapters.low_sodium', 'LowSodiumAdapter'),
+    'FoodSafetyAdapter': ('bareun_pipeline.adapters.food_safety', 'FoodSafetyAdapter'),
+    'ModelRestaurantAdapter': ('bareun_pipeline.adapters.model_restaurant', 'ModelRestaurantAdapter'),
+    'TouristInfoAdapter': ('bareun_pipeline.adapters.tourist_info', 'TouristInfoAdapter'),
+    'GeneralRestaurantAdapter': ('bareun_pipeline.adapters.general_restaurant', 'GeneralRestaurantAdapter'),
+}
 
+def __getattr__(name: str) -> Any:
+    """PEP 562 기반 어댑터 Lazy Import"""
+    if name in _LAZY_ADAPTERS:
+        module_path, attr_name = _LAZY_ADAPTERS[name]
+        module = importlib.import_module(module_path)
+        attr = getattr(module, attr_name)
+        globals()[name] = attr
+        return attr
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+def __dir__() -> list[str]:
+    base_utils = [
+        'BaseAdapter', 'CircuitBreaker', 'CircuitOpenError', 'create_session',
+        'parse_addr_tokens', 'canon_province', 'match_prefixes', 'extract_emd_from_addr',
+        'is_road_name', 'is_emd_token', 'norm_name', 'norm_addr', 'get_all_adapters'
+    ]
+    return base_utils + list(_LAZY_ADAPTERS.keys())
+
+def get_all_adapters() -> list[type]:
+    """
+    모든 어댑터 클래스 목록 반환 (Lazy Load)
+    이 함수가 호출되는 시점에 각 어댑터 모듈이 메모리에 로드됩니다.
+    """
+    return [__getattr__(name) for name in _LAZY_ADAPTERS]
 
 __all__ = [
-    # Base 클래스 및 유틸리티
-    'BaseAdapter',
-    'CircuitBreaker',
-    'CircuitOpenError',
-    'create_session',
-    'parse_addr_tokens',
-    'canon_province',
-    'match_prefixes',
-    'extract_emd_from_addr',
-    'is_road_name',
-    'is_emd_token',
-    'norm_name',
-    'norm_addr',
-    'get_all_adapters',
-    # 신규 어댑터는 지연 import 방식이므로 __all__에 추가하지 않음
+    # Base utilities
+    'BaseAdapter', 'CircuitBreaker', 'CircuitOpenError', 'create_session',
+    'parse_addr_tokens', 'canon_province', 'match_prefixes', 'extract_emd_from_addr',
+    'is_road_name', 'is_emd_token', 'norm_name', 'norm_addr', 'get_all_adapters',
+    # Lazy Adapters
+    'SafeRestaurantAdapter', 'LowSodiumAdapter', 'FoodSafetyAdapter',
+    'ModelRestaurantAdapter', 'TouristInfoAdapter', 'GeneralRestaurantAdapter',
 ]

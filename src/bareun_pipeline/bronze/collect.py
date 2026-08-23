@@ -1,28 +1,30 @@
 """
-Bronze Layer: 수집 Orchestration
-==================================
+Bronze Layer: Collection Orchestration
+======================================
 - 어댑터 병렬 수집 (ThreadPoolExecutor)
-- 시도별 체크포인트 관리
+- 시도별 체크포인트 관리 (CheckpointManager)
 - 구조화 로깅 (run_id, province 컨텍스트)
 - 원본 데이터 보존 (RawArchiver 연동)
 
-성능 개선:
-- 어댑터 병렬 실행으로 수집 속도 2~3배 향상
-- 각 어댑터는 I/O 바운드 작업이므로 병렬화 효과 큼
+리팩토링 사항 (Autofix):
+- 하드코딩된 어댑터 목록 제거 → adapters.get_all_adapters() 동적 로드 (누락 어댑터 자동 포함)
+- 메모리 누수 방지 (raw_rows 명시적 초기화)
+- Broad Exception 핸들링 구체화 및 exc_info=True로 스택 트레이스 보존
 """
 from __future__ import annotations
 
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import List, Dict, Any, Optional, TypedDict
+from typing import Optional, TypedDict
 
+from ..adapters import get_all_adapters
+from ..adapters.base import BaseAdapter
+from ..io.checkpoint import CheckpointManager
 from ..observability.logging import get_logger
 from ..observability.quota import QuotaManager
-from ..io.checkpoint import CheckpointManager
 from ..settings import get_settings
 from .raw_archiver import RawArchiver
-
 
 logger = get_logger(__name__)
 
@@ -44,7 +46,7 @@ class ProvinceResult(TypedDict):
     province: str
     run_id: str
     batch_id: str
-    adapters: Dict[str, AdapterResult]
+    adapters: dict[str, AdapterResult]
     total_records: int
     skipped: bool
 
@@ -52,7 +54,7 @@ class ProvinceResult(TypedDict):
 class NationwideResult(TypedDict):
     """전국 수집 결과"""
     run_id: str
-    provinces: Dict[str, ProvinceResult]
+    provinces: dict[str, ProvinceResult]
     total_records: int
     completed: int
     skipped: int
@@ -61,18 +63,14 @@ class NationwideResult(TypedDict):
 
 class BronzeCollector:
     """
-    Bronze Layer 수집기
+    Bronze Layer 수집 오케스트레이터
 
     사용법:
         collector = BronzeCollector()
         results = collector.collect_province('제주특별자치도')
         results = collector.collect_nationwide()
-
-    성능:
-        어댑터 병렬 실행으로 수집 속도 2~3배 향상
     """
 
-    # 어댑터 병렬 실행 시 최대 워커 수
     MAX_ADAPTER_WORKERS = 4
 
     def __init__(self):
@@ -81,61 +79,40 @@ class BronzeCollector:
         self.archiver = RawArchiver()
         self.quota = QuotaManager.get_instance()
 
-        # 어댑터 클래스 목록 (지연 import)
-        self._adapter_classes: Optional[List[type]] = None
-
-    def _get_adapter_classes(self) -> List[type]:
-        """어댑터 클래스 목록 반환 (지연 import)"""
-        if self._adapter_classes is None:
-            from ..adapters.safe_restaurant import SafeRestaurantAdapter
-            from ..adapters.low_sodium import LowSodiumAdapter
-            from ..adapters.food_safety import FoodSafetyAdapter
-            from ..adapters.model_restaurant import ModelRestaurantAdapter
-
-            self._adapter_classes = [
-                SafeRestaurantAdapter,
-                LowSodiumAdapter,
-                FoodSafetyAdapter,
-                ModelRestaurantAdapter,
-            ]
-
-        return self._adapter_classes
-
+    # RawArchiver에 threading.Lock 추가시 스레드 안정성 확보(진행 예정)
     def _collect_one_adapter(
         self,
-        AdapterClass: type,
+        adapter_cls: type[BaseAdapter],
         province: str,
         batch_id: str,
     ) -> AdapterResult:
-        """
-        단일 어댑터 수집 (워커 함수)
-
-        Args:
-            AdapterClass: 어댑터 클래스
-            province: 시도명
-            batch_id: 배치 식별자
-
-        Returns:
-            어댑터별 수집 결과
-        """
-        adapter_name = AdapterClass.__name__
+        """단일 어댑터 수집 (워커 함수)"""
+        adapter_name = adapter_cls.__name__
+        source_name = getattr(adapter_cls, "source", adapter_name)
 
         try:
-            adapter = AdapterClass()
+            adapter = adapter_cls()
             records = adapter.collect(province=province)
-
-            # 원본 데이터 보존
-            if adapter.raw_rows:
+            
+            raw_count = len(adapter.raw_rows)
+            
+            # 원본 데이터 보존 (Bronze Layer)
+            if raw_count > 0:
                 self.archiver.archive(
-                    source=adapter.source,
+                    source=source_name,
                     province=province,
                     rows=adapter.raw_rows,
                     batch_id=batch_id,
                 )
+                # 🐛 버그 수정: 메모리 누수 방지를 위해 명시적 초기화
+                if hasattr(adapter, "_clear_raw_rows"):
+                    adapter._clear_raw_rows()
+                else:
+                    adapter.raw_rows = []
 
             return {
                 'records': len(records),
-                'raw_rows': len(adapter.raw_rows),
+                'raw_rows': raw_count,
                 'status': 'success',
                 'error': None,
             }
@@ -147,12 +124,13 @@ class BronzeCollector:
                 province=province,
                 error=str(e),
                 error_type=type(e).__name__,
+                exc_info=True,  # 스택 트레이스 보존
             )
             return {
                 'records': 0,
                 'raw_rows': 0,
                 'status': 'failed',
-                'error': str(e),
+                'error': f"{type(e).__name__}: {str(e)}",
             }
 
     def collect_province(
@@ -160,26 +138,11 @@ class BronzeCollector:
         province: str,
         force: bool = False,
     ) -> ProvinceResult:
-        """
-        단일 시도 수집 (어댑터 병렬 실행)
-
-        Args:
-            province: 시도명
-            force: True이면 체크포인트 무시하고 강제 수집
-
-        Returns:
-            수집 결과 요약
-        """
+        """단일 시도 수집 (어댑터 병렬 실행)"""
         run_id = str(uuid.uuid4())[:8]
         batch_id = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-        # 로그 컨텍스트 바인딩
-        log = logger.bind(
-            run_id=run_id,
-            province=province,
-            batch_id=batch_id,
-        )
-
+        log = logger.bind(run_id=run_id, province=province, batch_id=batch_id)
         log.info('collect_province_start')
 
         result: ProvinceResult = {
@@ -193,25 +156,21 @@ class BronzeCollector:
 
         # 체크포인트 확인
         if not force and self.checkpoint.is_completed(
-            province,
-            max_age_hours=self.settings.checkpoint_max_age_hours,
+            province, max_age_hours=self.settings.checkpoint_max_age_hours
         ):
             log.info('collect_province_skip_checkpoint')
             result['skipped'] = True
             return result
 
-        # 어댑터 병렬 수집
-        adapter_classes = self._get_adapter_classes()
+        # 🐛 버그 수정: 동적 어댑터 로드 (하드코딩 제거 → 누락 어댑터 자동 포함)
+        adapter_classes = get_all_adapters()
 
         with ThreadPoolExecutor(max_workers=self.MAX_ADAPTER_WORKERS) as executor:
             futures = {
                 executor.submit(
-                    self._collect_one_adapter,
-                    AdapterClass,
-                    province,
-                    batch_id,
-                ): AdapterClass.__name__
-                for AdapterClass in adapter_classes
+                    self._collect_one_adapter, cls, province, batch_id
+                ): cls.__name__
+                for cls in adapter_classes
             }
 
             for future in as_completed(futures):
@@ -220,25 +179,18 @@ class BronzeCollector:
                     adapter_result = future.result()
                     result['adapters'][adapter_name] = adapter_result
                     result['total_records'] += adapter_result['records']
-
+                    
                     log.info(
                         'adapter_complete',
                         adapter=adapter_name,
                         records=adapter_result['records'],
                         status=adapter_result['status'],
                     )
-
                 except Exception as e:
-                    log.error(
-                        'adapter_unexpected_error',
-                        adapter=adapter_name,
-                        error=str(e),
-                    )
+                    log.error('adapter_unexpected_error', adapter=adapter_name, error=str(e))
                     result['adapters'][adapter_name] = {
-                        'records': 0,
-                        'raw_rows': 0,
-                        'status': 'failed',
-                        'error': str(e),
+                        'records': 0, 'raw_rows': 0,
+                        'status': 'failed', 'error': str(e),
                     }
 
         # 체크포인트 마커 저장
@@ -249,35 +201,19 @@ class BronzeCollector:
             total_records=result['total_records'],
             adapters=list(result['adapters'].keys()),
         )
-
         return result
 
     def collect_nationwide(
         self,
-        provinces: Optional[List[str]] = None,
+        provinces: Optional[list[str]] = None,
         force: bool = False,
     ) -> NationwideResult:
-        """
-        전국 시도 순회 수집
-
-        Args:
-            provinces: 수집 대상 시도 목록 (None이면 설정값 사용)
-            force: True이면 체크포인트 무시
-
-        Returns:
-            전국 수집 결과 요약
-        """
-        if provinces is None:
-            provinces = self.settings.provinces
-
+        """전국 시도 순회 수집"""
+        target_provinces = provinces or self.settings.provinces
         run_id = str(uuid.uuid4())[:8]
         log = logger.bind(run_id=run_id)
 
-        log.info(
-            'collect_nationwide_start',
-            provinces=provinces,
-            count=len(provinces),
-        )
+        log.info('collect_nationwide_start', provinces=target_provinces, count=len(target_provinces))
 
         results: NationwideResult = {
             'run_id': run_id,
@@ -288,13 +224,8 @@ class BronzeCollector:
             'failed': 0,
         }
 
-        for i, province in enumerate(provinces, 1):
-            log.info(
-                'collect_nationwide_progress',
-                current=i,
-                total=len(provinces),
-                province=province,
-            )
+        for i, province in enumerate(target_provinces, 1):
+            log.info('collect_nationwide_progress', current=i, total=len(target_provinces), province=province)
 
             try:
                 province_result = self.collect_province(province, force=force)
@@ -307,26 +238,14 @@ class BronzeCollector:
                     results['total_records'] += province_result['total_records']
 
             except Exception as e:
-                log.error(
-                    'collect_province_unexpected_error',
-                    province=province,
-                    error=str(e),
-                    error_type=type(e).__name__,
-                )
-                error_result: ProvinceResult = {
-                    'province': province,
-                    'run_id': run_id,
-                    'batch_id': '',
-                    'adapters': {},
-                    'total_records': 0,
-                    'skipped': False,
+                log.error('collect_province_unexpected_error', province=province, error=str(e))
+                results['provinces'][province] = {
+                    'province': province, 'run_id': run_id, 'batch_id': '',
+                    'adapters': {}, 'total_records': 0, 'skipped': False,
                 }
-                results['provinces'][province] = error_result
                 results['failed'] += 1
 
-        # 쿼터 최종 저장
         self.quota.finalize()
-
         log.info(
             'collect_nationwide_complete',
             completed=results['completed'],
@@ -335,5 +254,4 @@ class BronzeCollector:
             total_records=results['total_records'],
             quota_summary=self.quota.summary(),
         )
-
         return results

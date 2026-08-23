@@ -64,6 +64,12 @@ dependencies = [
     
     # 환경변수
     "python-dotenv>=1.0.0",
+    
+    # 좌표계 변환 (EPSG -> WGS84, general_restaurant에서 사용)
+    "pyproj>=3.6.0",
+    
+    # NER 및 NLP (초기 스택 명시)
+    "spacy>=3.7.0",
 ]
 
 [project.optional-dependencies]
