@@ -15,8 +15,10 @@ Bronze Layer의 원칙:
 """
 from .collect import BronzeCollector
 from .raw_archiver import RawArchiver
+from .tourist_checkpoint import TouristCheckpoint
 
 __all__ = [
     'BronzeCollector',
     'RawArchiver',
+    'TouristCheckpoint'
 ]

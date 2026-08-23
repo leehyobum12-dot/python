@@ -487,7 +487,7 @@ class BaseAdapter(ABC):
             quota_provider = None
             pii_fields = {'OWNER_NAME'}
 
-            def collect(self, province=None):
+            def collect(self, province=None, **kwargs):
                 ...
     """
 
@@ -520,6 +520,10 @@ class BaseAdapter(ABC):
 
         Returns:
             수집된 CertRecord 목록
+            
+        Note:
+            어댑터별 추가 파라미터는 __init__에서 받아야 합니다.
+            (예: TouristInfoAdapter(fetch_details=True, max_detail_count=30))
         """
         pass
 

@@ -316,3 +316,8 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """설정 인스턴스 반환 (캐싱 — 싱글톤)"""
     return Settings()
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """설정 인스턴스 반환 (캐싱 — 싱글톤)"""
+    return Settings()  # type: ignore[call-arg]

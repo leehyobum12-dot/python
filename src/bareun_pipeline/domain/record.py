@@ -205,6 +205,19 @@ class CertRecord(BaseModel):
 
     # ─── 품질/메타 ───
     
+    # 🆕 위생등급 필드 추가
+    hygiene_grade: Optional[str] = Field(
+        default=None,
+        pattern=r'^(갑|을|병)$',
+        description='위생등급 (갑/을/병)'
+    )
+    
+    # 데이터 품질 필드 추가
+    store_name_quality: Optional[str] = Field(
+        default='valid',
+        description='가게 이름 품질 (valid/needs_verify)',
+    )
+    
     # 데이터 품질 필드 추가
     store_name_quality: Optional[str] = Field(
         default='valid',

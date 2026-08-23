@@ -15,9 +15,8 @@
 - low_sodium: 나트륨 줄이기 실천음식점
 - food_safety: 식품안심업소(위생등급)
 - model_restaurant: 모범음식점
-
-이 패키지의 모듈은 requests만 사용하므로 가볍습니다.
-즉시 노출 방식을 유지합니다.
+- tourist_info: 한국관광공사 국문 관광정보 서비스
+- general_restaurant: 행정안전부 일반음식점 조회서비스
 """
 from __future__ import annotations
 
@@ -36,6 +35,7 @@ from .base import (
     norm_addr,
 )
 
+
 def get_all_adapters() -> list[type]:
     """
     모든 어댑터 클래스 목록 반환
@@ -49,15 +49,21 @@ def get_all_adapters() -> list[type]:
     from .low_sodium import LowSodiumAdapter
     from .food_safety import FoodSafetyAdapter
     from .model_restaurant import ModelRestaurantAdapter
+    from .tourist_info import TouristInfoAdapter
+    from .general_restaurant import GeneralRestaurantAdapter
 
     return [
         SafeRestaurantAdapter,
         LowSodiumAdapter,
         FoodSafetyAdapter,
         ModelRestaurantAdapter,
+        TouristInfoAdapter,
+        GeneralRestaurantAdapter,
     ]
 
+
 __all__ = [
+    # Base 클래스 및 유틸리티
     'BaseAdapter',
     'CircuitBreaker',
     'CircuitOpenError',
@@ -71,4 +77,5 @@ __all__ = [
     'norm_name',
     'norm_addr',
     'get_all_adapters',
+    # 신규 어댑터는 지연 import 방식이므로 __all__에 추가하지 않음
 ]
