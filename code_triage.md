@@ -1,0 +1,209 @@
+# Bareun Code Triage Report
+- generated_at_utc: 2026-08-23T07:22:00+00:00
+- root: C:\Users\hblee\hyobeom\bareun\app\python
+- scanned_files: 73
+- problem_files: 8
+- needs_review_files: 19
+- clean_files: 46
+- stable_candidates: 38
+
+## Recommended Folder Boundaries
+- adapters: external API/quota; bronze: raw ingest; silver: normalize/match/enrich
+- gold: repository/upsert/PostGIS; domain: models/rules; io: checkpoint/state
+- observability: logging/diagnostics; cli: command wiring only
+
+## Problem Files
+- src/bareun_pipeline/adapters/base.py | lines=617 | funcs=23 | classes=3 | issues=4
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN file_too_long: lines=617 > 350
+  - WARN long_function: max_function_lines=81 > 80
+- src/bareun_pipeline/adapters/food_safety.py | lines=537 | funcs=14 | classes=1 | issues=6
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN file_too_long: lines=537 > 350
+  - WARN long_function: max_function_lines=81 > 80
+- src/bareun_pipeline/adapters/general_restaurant.py | lines=362 | funcs=7 | classes=1 | issues=6
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN file_too_long: lines=362 > 350
+  - WARN long_function: max_function_lines=130 > 80
+- src/bareun_pipeline/adapters/tourist_info.py | lines=660 | funcs=10 | classes=1 | issues=5
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN file_too_long: lines=660 > 350
+  - WARN long_function: max_function_lines=230 > 80
+- src/bareun_pipeline/bronze/collect.py | lines=339 | funcs=5 | classes=4 | issues=4
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN long_function: max_function_lines=96 > 80
+- src/bareun_pipeline/gold/supabase_loader.py | lines=244 | funcs=7 | classes=1 | issues=4
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN long_function: max_function_lines=85 > 80
+- src/bareun_pipeline/silver/enrich.py | lines=1399 | funcs=52 | classes=6 | issues=23
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN file_too_long: lines=1399 > 350
+  - WARN too_many_functions: functions=52 > 25
+  - WARN long_function: max_function_lines=167 > 80
+  - WARN too_many_classes: classes=6 > 5
+- src/bareun_pipeline/silver/menu_extract.py | lines=173 | funcs=4 | classes=1 | issues=4
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+  - WARN broad_except: broad except Exception detected
+
+## Needs Review
+- src/bareun_pipeline/adapters/low_sodium.py | issues=3
+- src/bareun_pipeline/adapters/safe_restaurant.py | issues=3
+- src/bareun_pipeline/bronze/raw_archiver.py | issues=2
+- src/bareun_pipeline/bronze/tourist_checkpoint.py | issues=2
+- src/bareun_pipeline/domain/record.py | issues=1
+- src/bareun_pipeline/gold/ingest_to_supabase.py | issues=3
+- src/bareun_pipeline/gold/transform.py | issues=1
+- src/bareun_pipeline/nlp/llm/verifier.py | issues=2
+- src/bareun_pipeline/nlp/ner/pipeline.py | issues=3
+- src/bareun_pipeline/nlp/ner/predictor.py | issues=2
+- src/bareun_pipeline/observability/code_triage.py | issues=1
+- src/bareun_pipeline/silver/merge.py | issues=2
+- src/bareun_pipeline/training/trainer.py | issues=1
+- src/scripts/e2e_sample_test.py | issues=3
+- src/scripts/probe_tourapi_key.py | issues=1
+- src/scripts/test_adapters.py | issues=1
+- src/scripts/test_coordinate_matching.py | issues=3
+- src/scripts/test_matching_radius.py | issues=1
+- src/scripts/test_single_province.py | issues=1
+
+## Clean Files
+- src/bareun_pipeline/__init__.py
+- src/bareun_pipeline/adapters/__init__.py
+- src/bareun_pipeline/adapters/model_restaurant.py
+- src/bareun_pipeline/bronze/__init__.py
+- src/bareun_pipeline/cli.py
+- src/bareun_pipeline/domain/__init__.py
+- src/bareun_pipeline/domain/avoid_tags.py
+- src/bareun_pipeline/domain/constants.py
+- src/bareun_pipeline/domain/dedup.py
+- src/bareun_pipeline/domain/privacy.py
+- src/bareun_pipeline/domain/taxonomy.py
+- src/bareun_pipeline/gold/__init__.py
+- src/bareun_pipeline/gold/export.py
+- src/bareun_pipeline/io/__init__.py
+- src/bareun_pipeline/io/checkpoint.py
+- src/bareun_pipeline/nlp/__init__.py
+- src/bareun_pipeline/nlp/hybrid.py
+- src/bareun_pipeline/nlp/llm/__init__.py
+- src/bareun_pipeline/nlp/ner/__init__.py
+- src/bareun_pipeline/nlp/ner/postprocessor.py
+- src/bareun_pipeline/observability/__init__.py
+- src/bareun_pipeline/observability/logging.py
+- src/bareun_pipeline/observability/quota.py
+- src/bareun_pipeline/preprocessing/__init__.py
+- src/bareun_pipeline/preprocessing/food_db_integrator.py
+- src/bareun_pipeline/settings.py
+- src/bareun_pipeline/silver/__init__.py
+- src/bareun_pipeline/silver/classify.py
+- src/bareun_pipeline/silver/normalize.py
+- src/bareun_pipeline/training/__init__.py
+- src/bareun_pipeline/training/data_generator.py
+- src/bareun_pipeline/training/label_real_data.py
+- src/bareun_pipeline/training/retrain_manager.py
+- src/bareun_pipeline/training/verify_labels.py
+- src/flows/__init__.py
+- src/flows/menu_enrich_flow.py
+- src/flows/national_pipeline.py
+- src/scripts/verify_output.py
+- src/tests/__init__.py
+- src/tests/conftest.py
+- src/tests/intergration/test_pipeline_flow.py
+- src/tests/intergration/test_supabase_loader.py
+- src/tests/unit/test_domain.py
+- src/tests/unit/test_gold.py
+- src/tests/unit/test_io.py
+- src/tests/unit/test_silver.py
+
+## Stable Candidates (likely low-change)
+- src/bareun_pipeline/__init__.py
+- src/bareun_pipeline/adapters/__init__.py
+- src/bareun_pipeline/adapters/model_restaurant.py
+- src/bareun_pipeline/bronze/__init__.py
+- src/bareun_pipeline/cli.py
+- src/bareun_pipeline/domain/__init__.py
+- src/bareun_pipeline/domain/avoid_tags.py
+- src/bareun_pipeline/domain/dedup.py
+- src/bareun_pipeline/domain/privacy.py
+- src/bareun_pipeline/domain/taxonomy.py
+- src/bareun_pipeline/gold/__init__.py
+- src/bareun_pipeline/gold/export.py
+- src/bareun_pipeline/io/__init__.py
+- src/bareun_pipeline/io/checkpoint.py
+- src/bareun_pipeline/nlp/__init__.py
+- src/bareun_pipeline/nlp/hybrid.py
+- src/bareun_pipeline/nlp/llm/__init__.py
+- src/bareun_pipeline/nlp/ner/__init__.py
+- src/bareun_pipeline/observability/__init__.py
+- src/bareun_pipeline/observability/logging.py
+- src/bareun_pipeline/observability/quota.py
+- src/bareun_pipeline/preprocessing/__init__.py
+- src/bareun_pipeline/silver/__init__.py
+- src/bareun_pipeline/silver/normalize.py
+- src/bareun_pipeline/training/__init__.py
+- src/bareun_pipeline/training/label_real_data.py
+- src/bareun_pipeline/training/retrain_manager.py
+- src/bareun_pipeline/training/verify_labels.py
+- src/flows/__init__.py
+- src/scripts/verify_output.py
+- src/tests/__init__.py
+- src/tests/conftest.py
+- src/tests/intergration/test_pipeline_flow.py
+- src/tests/intergration/test_supabase_loader.py
+- src/tests/unit/test_domain.py
+- src/tests/unit/test_gold.py
+- src/tests/unit/test_io.py
+- src/tests/unit/test_silver.py
+
+## Split Suggestions
+- src/bareun_pipeline/adapters/base.py: large file, long function, volatile dependencies + size. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/adapters/food_safety.py: large file, long function, volatile dependencies + size. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/adapters/general_restaurant.py: large file, long function, volatile dependencies + size. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/adapters/low_sodium.py: long function, volatile dependencies + size. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/adapters/safe_restaurant.py: long function. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/adapters/tourist_info.py: large file, long function, volatile dependencies + size. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/bronze/collect.py: long function. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/bronze/raw_archiver.py: volatile dependencies + size. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/domain/record.py: large file. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/gold/supabase_loader.py: long function. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/nlp/llm/verifier.py: volatile dependencies + size. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/nlp/ner/predictor.py: long function. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/observability/code_triage.py: large file. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/silver/enrich.py: large file, too many functions, long function, too many classes, volatile dependencies + size. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/silver/merge.py: large file, long function. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/bareun_pipeline/training/trainer.py: long function, volatile dependencies + size. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/scripts/e2e_sample_test.py: large file, long function. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/scripts/test_adapters.py: long function. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
+- src/scripts/test_coordinate_matching.py: long function. Split by responsibility: adapters/clients, silver/transform, gold/repository, domain/models, io/checkpoint.
