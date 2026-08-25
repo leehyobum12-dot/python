@@ -21,17 +21,16 @@
 - PII 필드 명시적 정의
 - 파일 경로 탐색 로직 강화
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
 
 import pandas as pd
 
-from .base import BaseAdapter, parse_addr_tokens
 from ..domain.record import CertRecord
 from ..observability.logging import get_logger
-
+from .base import BaseAdapter, parse_addr_tokens
 
 logger = get_logger(__name__)
 
@@ -70,11 +69,11 @@ class ModelRestaurantAdapter(BaseAdapter):
     # 인코딩 후보
     ENCODINGS = ('cp949', 'euc-kr', 'utf-8', 'utf-8-sig')
 
-    def __init__(self, csv_path: Optional[str] = None):
+    def __init__(self, csv_path: str | None = None):
         super().__init__()
         self.csv_path = Path(csv_path) if csv_path else self._find_csv()
 
-    def _find_csv(self) -> Optional[Path]:
+    def _find_csv(self) -> Path | None:
         """
         CSV 파일 자동 탐색
 
@@ -110,7 +109,7 @@ class ModelRestaurantAdapter(BaseAdapter):
         logger.warning('model_restaurant_csv_not_found')
         return None
 
-    def _read(self) -> Optional[pd.DataFrame]:
+    def _read(self) -> pd.DataFrame | None:
         """
         CSV 파일 로드 (인코딩 자동 감지)
 
@@ -157,7 +156,7 @@ class ModelRestaurantAdapter(BaseAdapter):
         )
         return None
 
-    def collect(self, province: Optional[str] = None) -> List[CertRecord]:
+    def collect(self, province: str | None = None) -> list[CertRecord]:
         """
         데이터 수집
 
@@ -181,7 +180,7 @@ class ModelRestaurantAdapter(BaseAdapter):
             s = str(v).strip() if pd.notna(v) else ''
             return s if s not in ('', 'nan', 'NaN', 'None', 'NaT') else None
 
-        records: List[CertRecord] = []
+        records: list[CertRecord] = []
 
         for _, row in df.iterrows():
             status = clean(row.iloc[self.COL_STATUS]) or ''

@@ -23,38 +23,59 @@ NLP: NER 후처리 모듈 (8단계 다층 검증)
 - 구조화 로깅
 - 타입 안전성 강화
 """
+
 from __future__ import annotations
 
 import re
-from typing import List, Optional
 
-from ...settings import get_settings
 from ...domain.constants import (
     COOKING_SUFFIXES,
     INGREDIENT_NOUNS,
     LOCATION_BLACKLIST,
+    LOCATION_PREFIXES,
+    PROTECTED_SUFFIXES,
     SLANG_BLACKLIST,
     TIME_QUANTITY_BLACKLIST,
-    PROTECTED_SUFFIXES,
-    LOCATION_PREFIXES,
     VERB_ENDINGS,
 )
-
+from ...settings import get_settings
 
 # 숫자/특수문자 패턴
-NUMBER_SPECIAL_PATTERN = re.compile(
-    r'^[\d\s\.,\-\+\(\)\[\]\{\}\/\\:;!?@#$%^&*_=<>]+$'
-)
+NUMBER_SPECIAL_PATTERN = re.compile(r'^[\d\s\.,\-\+\(\)\[\]\{\}\/\\:;!?@#$%^&*_=<>]+$')
 LOCATION_NUMBER_PATTERN = re.compile(r'\d+번길|\d+층|\d+m|\d+만원|\d+원')
 
 # 조사 목록 (긴 것부터 정렬하여 매칭)
 POSTPOSITIONS = sorted(
-    ['에서', '에게', '한테', '께', '에게서',
-     '를', '을', '이', '가', '의',
-     '에', '으로', '로', '와', '과', '랑', '하고',
-     '도', '만', '까지', '부터', '조차', '마저', '나마',
-     '은', '는'],
-    key=len, reverse=True
+    [
+        '에서',
+        '에게',
+        '한테',
+        '께',
+        '에게서',
+        '를',
+        '을',
+        '이',
+        '가',
+        '의',
+        '에',
+        '으로',
+        '로',
+        '와',
+        '과',
+        '랑',
+        '하고',
+        '도',
+        '만',
+        '까지',
+        '부터',
+        '조차',
+        '마저',
+        '나마',
+        '은',
+        '는',
+    ],
+    key=len,
+    reverse=True,
 )
 
 
@@ -81,7 +102,7 @@ class NERPostprocessor:
         """지역 접두사 제거 (제주갈치조림 → 갈치조림)"""
         for prefix in sorted(LOCATION_PREFIXES, key=len, reverse=True):
             if text.startswith(prefix) and len(text) > len(prefix):
-                remainder = text[len(prefix):]
+                remainder = text[len(prefix) :]
                 if len(remainder) >= self.settings.menu_min_length:
                     return remainder
         return text
@@ -186,7 +207,7 @@ class NERPostprocessor:
 
     # ─────────────── 엔티티 정제 ───────────────
 
-    def clean_entity(self, text: str) -> Optional[str]:
+    def clean_entity(self, text: str) -> str | None:
         """
         엔티티 정제 (특수문자/조사 제거 + 지역 접두사 정규화)
 
@@ -209,7 +230,7 @@ class NERPostprocessor:
         # 2. 조사 제거 (긴 것부터, 보호 접미사 확인)
         for post in POSTPOSITIONS:
             if text.endswith(post) and len(text) > len(post):
-                candidate = text[:-len(post)]
+                candidate = text[: -len(post)]
                 if not self._is_protected_suffix(text):
                     text = candidate
                     break
@@ -228,11 +249,8 @@ class NERPostprocessor:
     # ─────────────── 메인 파이프라인 ───────────────
 
     def process(
-        self,
-        entities: List[str],
-        entity_type: str = 'menu',
-        store_name: str = ''
-    ) -> List[str]:
+        self, entities: list[str], entity_type: str = 'menu', store_name: str = ''
+    ) -> list[str]:
         """
         전체 후처리 파이프라인
 
@@ -254,16 +272,10 @@ class NERPostprocessor:
 
         # 2. None 제거 + 유효성 검증
         if entity_type == 'menu':
-            cleaned = [
-                e for e in cleaned
-                if e is not None and self._is_valid_menu(e, store_name)
-            ]
+            cleaned = [e for e in cleaned if e is not None and self._is_valid_menu(e, store_name)]
         else:
             # 가게명: 지역명만 필터링
-            cleaned = [
-                e for e in cleaned
-                if e is not None and e not in LOCATION_BLACKLIST
-            ]
+            cleaned = [e for e in cleaned if e is not None and e not in LOCATION_BLACKLIST]
 
         # 3. 중복 제거 (순서 유지)
         seen = set()

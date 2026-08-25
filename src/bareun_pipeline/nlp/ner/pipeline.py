@@ -19,17 +19,16 @@ NLP: NER 파이프라인 통합 모듈
 - 구조화 로깅
 - 타입 안전성 강화
 """
+
 from __future__ import annotations
 
 import json
 import os
 from datetime import datetime
-from typing import List, Dict, Optional
 
-from .predictor import MenuNERPredictor
-from ...settings import get_settings
 from ...observability.logging import get_logger
-
+from ...settings import get_settings
+from .predictor import MenuNERPredictor
 
 logger = get_logger(__name__)
 
@@ -50,19 +49,14 @@ class NERMenuPipeline:
         self.settings = get_settings()
         self.predictor = MenuNERPredictor()
         self.log_count = 0
-        self._log_buffer: List[Dict] = []
+        self._log_buffer: list[dict] = []
 
         # 로깅 디렉토리 생성
         os.makedirs(self.settings.data_dir, exist_ok=True)
 
         logger.info('ner_pipeline_initialized')
 
-    def extract_menus_from_text(
-        self,
-        text: str,
-        store_name: str,
-        source: str = 'blog'
-    ) -> Dict:
+    def extract_menus_from_text(self, text: str, store_name: str, source: str = 'blog') -> dict:
         """
         텍스트에서 메뉴 추출 (NER + 후처리)
 
@@ -94,9 +88,7 @@ class NERMenuPipeline:
         menus = result.get('menus', [])
 
         # 메뉴 필터링 (가게 이름과 동일한 메뉴 제외)
-        filtered_menus = [
-            m for m in menus if m != store_name and len(m) >= 2
-        ]
+        filtered_menus = [m for m in menus if m != store_name and len(m) >= 2]
 
         # 대표메뉴 선택
         main_menu = filtered_menus[0] if filtered_menus else None
@@ -117,13 +109,7 @@ class NERMenuPipeline:
             'confidence': confidence,
         }
 
-    def _log_real_data(
-        self,
-        text: str,
-        store_name: str,
-        source: str,
-        menus: List[str]
-    ) -> None:
+    def _log_real_data(self, text: str, store_name: str, source: str, menus: list[str]) -> None:
         """
         실전 데이터 로깅 (재학습용)
 
@@ -169,10 +155,7 @@ class NERMenuPipeline:
         if not self._log_buffer:
             return
 
-        log_path = os.path.join(
-            self.settings.data_dir,
-            'real_data_log.jsonl'
-        )
+        log_path = os.path.join(self.settings.data_dir, 'real_data_log.jsonl')
 
         try:
             with open(log_path, 'a', encoding='utf-8') as f:

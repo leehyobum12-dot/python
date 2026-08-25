@@ -17,15 +17,16 @@ Named Entity Recognition (개체명 인식) 모듈입니다.
 사용법 (직접):
     from bareun_pipeline.nlp.ner.predictor import MenuNERPredictor
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
 import importlib
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .predictor import MenuNERPredictor
-    from .postprocessor import NERPostprocessor
     from .pipeline import NERMenuPipeline
+    from .postprocessor import NERPostprocessor
+    from .predictor import MenuNERPredictor
 
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
@@ -51,6 +52,6 @@ def __dir__() -> list[str]:
 
 __all__ = [
     'MenuNERPredictor',
-    'NERPostprocessor',
     'NERMenuPipeline',
+    'NERPostprocessor',
 ]

@@ -12,14 +12,16 @@ Lazy 노출 (무거운 모듈):
 - enrich: 지오코딩 (httpx)
 - menu_extract: NER + LLM (torch, transformers)
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
 import importlib
+from typing import TYPE_CHECKING, Any
+
+from .merge import Merger, merge_records
 
 # 가벼운 모듈은 즉시 노출
 from .normalize import Normalizer, normalize_records
-from .merge import Merger, merge_records
 
 # Pylance/Pyright 타입 검사용 (런타임에는 실행되지 않음)
 if TYPE_CHECKING:
@@ -58,13 +60,13 @@ def __dir__() -> list[str]:
 
 # 정적 분석기(Pylance)가 인식할 수 있도록 리터럴 리스트로 명시
 __all__ = [
-    'Normalizer',
-    'normalize_records',
+    'MenuExtractor',
     'Merger',
-    'merge_records',
+    'Normalizer',
+    'SilverEnricher',
     'TaxonomyClassifier',
     'classify_text',
     'get_classifier',
-    'SilverEnricher',
-    'MenuExtractor',
+    'merge_records',
+    'normalize_records',
 ]

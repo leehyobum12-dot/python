@@ -20,20 +20,20 @@ Gold Layer: DB 스키마 매칭
 - reject 로깅
 - 타입 안전성 강화
 """
+
 from __future__ import annotations
 
 import json
 import os
 from datetime import date, datetime
-from typing import List, Dict, Any, Optional
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ..domain.record import CertRecord
 from ..domain.dedup import generate_dedup_key
+from ..domain.record import CertRecord
 from ..observability.logging import get_logger
 from ..settings import get_settings
-
 
 logger = get_logger(__name__)
 
@@ -53,68 +53,70 @@ class GoldRestaurant(BaseModel):
 
     # 식별자
     dedup_key: str = Field(
-        ...,
-        min_length=1,
-        max_length=64,
-        description='sha256 해시 기반 중복 제거 키'
+        ..., min_length=1, max_length=64, description='sha256 해시 기반 중복 제거 키'
     )
     data_source: str = Field(
-        ...,
-        max_length=50,
-        description='public_api|cross_source|naver_api|kakao_api'
+        ..., max_length=50, description='public_api|cross_source|naver_api|kakao_api'
     )
 
     # 기본 정보
     store_name: str = Field(..., min_length=2, max_length=100)
     province: str = Field(..., max_length=50)
     municipality: str = Field(..., max_length=50)
-    emd: Optional[str] = Field(default=None, max_length=50)
+    emd: str | None = Field(default=None, max_length=50)
 
     # 주소
-    address_road: Optional[str] = Field(default=None, max_length=200)
-    address_lotnum: Optional[str] = Field(default=None, max_length=200)
+    address_road: str | None = Field(default=None, max_length=200)
+    address_lotnum: str | None = Field(default=None, max_length=200)
 
     # 좌표
-    lat: Optional[float] = Field(None, ge=33.0, le=38.6)
-    lng: Optional[float] = Field(None, ge=124.5, le=132.0)
+    lat: float | None = Field(None, ge=33.0, le=38.6)
+    lng: float | None = Field(None, ge=124.5, le=132.0)
 
     # 메뉴
-    main_menu: Optional[str] = Field(default=None, max_length=50)
-    main_menu_source: Optional[str] = Field(default=None)
-    menus: List[str] = Field(default_factory=list, max_length=10)
-    menus_source: Optional[str] = Field(default=None)
+    main_menu: str | None = Field(default=None, max_length=50)
+    main_menu_source: str | None = Field(default=None)
+    menus: list[str] = Field(default_factory=list, max_length=10)
+    menus_source: str | None = Field(default=None)
 
     # 연락처/업종
-    phone: Optional[str] = Field(default=None, max_length=20)
-    biz_type: Optional[str] = Field(default=None, max_length=100)
+    phone: str | None = Field(default=None, max_length=20)
+    biz_type: str | None = Field(default=None, max_length=100)
 
     # 인증
-    certs: List[str] = Field(default_factory=list)
-    designated_at: Optional[date] = Field(default=None)
+    certs: list[str] = Field(default_factory=list)
+    designated_at: date | None = Field(default=None)
 
     # 7차원 태그
-    cuisine_tags: List[str] = Field(default_factory=list)
-    nutrient_tags: List[str] = Field(default_factory=list)
-    cooking_tags: List[str] = Field(default_factory=list)
-    ingredient_tags: List[str] = Field(default_factory=list)
-    regional_tags: List[str] = Field(default_factory=list)
-    allergen_tags: List[str] = Field(default_factory=list)
-    occasion_tags: List[str] = Field(default_factory=list)
+    cuisine_tags: list[str] = Field(default_factory=list)
+    nutrient_tags: list[str] = Field(default_factory=list)
+    cooking_tags: list[str] = Field(default_factory=list)
+    ingredient_tags: list[str] = Field(default_factory=list)
+    regional_tags: list[str] = Field(default_factory=list)
+    allergen_tags: list[str] = Field(default_factory=list)
+    occasion_tags: list[str] = Field(default_factory=list)
 
     # avoid_tags (자동 생성)
-    avoid_tags: List[str] = Field(default_factory=list)
+    avoid_tags: list[str] = Field(default_factory=list)
 
     # 품질
     quality_score: int = Field(default=0, ge=0, le=100)
 
     @field_validator(
-        'menus', 'cuisine_tags', 'nutrient_tags', 'cooking_tags',
-        'ingredient_tags', 'regional_tags', 'allergen_tags',
-        'occasion_tags', 'avoid_tags', 'certs',
-        mode='before'
+        'menus',
+        'cuisine_tags',
+        'nutrient_tags',
+        'cooking_tags',
+        'ingredient_tags',
+        'regional_tags',
+        'allergen_tags',
+        'occasion_tags',
+        'avoid_tags',
+        'certs',
+        mode='before',
     )
     @classmethod
-    def ensure_list(cls, v: Any) -> List[str]:
+    def ensure_list(cls, v: Any) -> list[str]:
         """None이나 문자열이 들어와도 리스트로 변환"""
         if v is None:
             return []
@@ -126,7 +128,7 @@ class GoldRestaurant(BaseModel):
             return [str(item) for item in v if item]
         return []
 
-    def to_payload(self) -> Dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         """bulk_upsert_restaurants RPC용 payload 변환"""
         return {
             'store_name': self.store_name,
@@ -169,7 +171,7 @@ class GoldTransformer:
     """
 
     # 메뉴 출처 점수
-    MENU_SOURCE_SCORE: Dict[str, int] = {
+    MENU_SOURCE_SCORE: dict[str, int] = {
         'public_api': 10,
         'cross_source': 8,
         'naver_api': 6,
@@ -182,7 +184,7 @@ class GoldTransformer:
         'original': 5,
     }
 
-    def transform(self, records: List[CertRecord]) -> List[GoldRestaurant]:
+    def transform(self, records: list[CertRecord]) -> list[GoldRestaurant]:
         """
         CertRecord 목록을 GoldRestaurant으로 변환
 
@@ -194,19 +196,23 @@ class GoldTransformer:
         """
         logger.info('gold_transform_start', count=len(records))
 
-        results: List[GoldRestaurant] = []
-        rejects: List[Dict[str, Any]] = []
+        results: list[GoldRestaurant] = []
+        rejects: list[dict[str, Any]] = []
 
         for record in records:
             try:
                 gold = self._transform_one(record)
                 results.append(gold)
             except Exception as e:
-                rejects.append({
-                    'record': record.model_dump() if hasattr(record, 'model_dump') else str(record),
-                    'error': str(e),
-                    'error_type': type(e).__name__,
-                })
+                rejects.append(
+                    {
+                        'record': record.model_dump()
+                        if hasattr(record, 'model_dump')
+                        else str(record),
+                        'error': str(e),
+                        'error_type': type(e).__name__,
+                    }
+                )
                 logger.warning(
                     'gold_transform_reject',
                     name=record.raw_name,
@@ -326,7 +332,7 @@ class GoldTransformer:
 
         return min(score, 100)
 
-    def _save_rejects(self, rejects: List[Dict[str, Any]]) -> None:
+    def _save_rejects(self, rejects: list[dict[str, Any]]) -> None:
         """검증 실패 데이터 저장"""
         settings = get_settings()
         os.makedirs(settings.rejects_dir, exist_ok=True)
@@ -341,7 +347,7 @@ class GoldTransformer:
         logger.info('gold_rejects_saved', path=filepath, count=len(rejects))
 
 
-def transform_records(records: List[CertRecord]) -> List[GoldRestaurant]:
+def transform_records(records: list[CertRecord]) -> list[GoldRestaurant]:
     """레코드 변환 (편의 함수)"""
     transformer = GoldTransformer()
     return transformer.transform(records)

@@ -8,18 +8,27 @@ Bareun Pipeline: Food Safety Mapper
 
 위치: src/bareun_pipeline/adapters/food_safety/mapper.py
 """
+
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ...domain.address import match_prefixes, parse_addr_tokens
 from ...domain.record import CertRecord
 
-
 # 필드 후보 (스키마 변경 대응 SSOT)
 FIELD_CANDIDATES: dict[str, tuple[str, ...]] = {
     'name': ('BSSH_NM', 'UPSO_NM', 'ENTRPS_NM', '업소명', '상호명', '영업소명'),
-    'addr': ('ADDR', 'SITE_ADDR', 'RDNMADR', 'ROAD_NM_ADDR', '도로명주소', '소재지도로명주소', '영업장소재지', '소재지'),
+    'addr': (
+        'ADDR',
+        'SITE_ADDR',
+        'RDNMADR',
+        'ROAD_NM_ADDR',
+        '도로명주소',
+        '소재지도로명주소',
+        '영업장소재지',
+        '소재지',
+    ),
     'lot': ('JIBUN_ADDR', 'LOT_ADDR', '지번주소'),
     'phone': ('TELNO', 'TEL', '전화번호', '업소전화번호'),
     'biz': ('INDUTY_NM', 'INDUTY_CD_NM', '업종명', '업태구분명'),
@@ -43,20 +52,20 @@ def get_field(item: dict[str, Any], field_name: str) -> str:
 
 
 def map_to_cert_records(
-    rows: list[dict[str, Any]], 
-    province: Optional[str] = None,
+    rows: list[dict[str, Any]],
+    province: str | None = None,
     source: str = 'food_safety',
     cert_type: str = 'food_safety',
 ) -> list[CertRecord]:
     """
     원본 데이터 리스트를 CertRecord 리스트로 변환
-    
+
     Args:
         rows: API에서 수집된 원본 딕셔너리 리스트
         province: 필터링할 시도명 (None이면 전국)
         source: 데이터 소스 식별자
         cert_type: 인증 타입
-        
+
     Returns:
         변환된 CertRecord 리스트 (유효성 검증 통과 건만)
     """
@@ -73,13 +82,13 @@ def map_to_cert_records(
             continue
 
         p, m, e = parse_addr_tokens(addr)
-        
+
         clsbiz_dt = get_field(item, 'closed')
         cancel_dt = get_field(item, 'cancel')
         status = get_field(item, 'status')
-        
+
         # 영업 상태 판별 로직
-        is_active = ('폐업' not in status and not clsbiz_dt and not cancel_dt)
+        is_active = '폐업' not in status and not clsbiz_dt and not cancel_dt
 
         record = CertRecord(
             source=source,
@@ -100,7 +109,7 @@ def map_to_cert_records(
             is_active=is_active,
             raw=item,  # 원본 데이터 보존 (Bronze 아카이빙 및 디버깅용)
         )
-        
+
         # 도메인 모델의 자체 검증 로직 통과 시에만 추가
         if record.is_valid():
             records.append(record)

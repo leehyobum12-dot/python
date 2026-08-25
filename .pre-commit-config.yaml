@@ -1,0 +1,22 @@
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.0
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.363
+    hooks:
+      - id: pyright
+
+  - repo: local
+    hooks:
+      - id: pytest-unit
+        name: pytest-unit
+        entry: pytest src/tests/unit/ -q --tb=no
+        language: system
+        pass_filenames: false
+        always_run: true

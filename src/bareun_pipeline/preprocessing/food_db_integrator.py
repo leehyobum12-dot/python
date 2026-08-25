@@ -19,6 +19,7 @@
 - 구조화 로깅
 - 타입 안전성 강화
 """
+
 from __future__ import annotations
 
 import csv
@@ -26,11 +27,11 @@ import glob
 import json
 import os
 import re
-from typing import Set, Dict, List, Optional, TypedDict
+from typing import TypedDict
 
 from ..domain.constants import (
-    EXCLUDE_CATEGORIES,
     COOKING_SUFFIXES,
+    EXCLUDE_CATEGORIES,
     INGREDIENT_NOUNS,
     MODIFIER_PREFIXES,
     PROCESSED_EXCLUDE_KEYWORDS,
@@ -38,24 +39,25 @@ from ..domain.constants import (
 from ..observability.logging import get_logger
 from ..settings import get_settings
 
-
 logger = get_logger(__name__)
 
 
 class DecomposeResult(TypedDict):
     """메뉴 분해 결과"""
+
     original: str
-    ingredients: List[str]
-    modifiers: List[str]
-    cooking: Optional[str]
-    base_menu: Optional[str]
+    ingredients: list[str]
+    modifiers: list[str]
+    cooking: str | None
+    base_menu: str | None
 
 
 class NormalizationDict(TypedDict):
     """정규화 사전 구조"""
+
     version: str
-    base_menus: Dict[str, Dict]
-    stats: Dict[str, float]
+    base_menus: dict[str, dict]
+    stats: dict[str, float]
 
 
 def decompose_menu_name(name: str) -> DecomposeResult:
@@ -83,7 +85,7 @@ def decompose_menu_name(name: str) -> DecomposeResult:
     for suffix in sorted(COOKING_SUFFIXES, key=len, reverse=True):
         if remaining.endswith(suffix):
             result['cooking'] = suffix
-            remaining = remaining[:-len(suffix)]
+            remaining = remaining[: -len(suffix)]
             break
 
     # 수식어 접두사 추출
@@ -93,7 +95,7 @@ def decompose_menu_name(name: str) -> DecomposeResult:
         for prefix in MODIFIER_PREFIXES:
             if remaining.startswith(prefix):
                 result['modifiers'].append(prefix)
-                remaining = remaining[len(prefix):]
+                remaining = remaining[len(prefix) :]
                 changed = True
                 break
 
@@ -109,7 +111,7 @@ def decompose_menu_name(name: str) -> DecomposeResult:
     return result
 
 
-def build_normalization_dictionary(food_names: Set[str]) -> NormalizationDict:
+def build_normalization_dictionary(food_names: set[str]) -> NormalizationDict:
     """
     메뉴 정규화 사전 생성
 
@@ -121,7 +123,7 @@ def build_normalization_dictionary(food_names: Set[str]) -> NormalizationDict:
     Returns:
         정규화 사전
     """
-    base_menus: Dict[str, Dict] = {}
+    base_menus: dict[str, dict] = {}
 
     for name in food_names:
         decomposed = decompose_menu_name(name)
@@ -153,7 +155,10 @@ def build_normalization_dictionary(food_names: Set[str]) -> NormalizationDict:
     stats = {
         'total_base_menus': len(base_menus),
         'total_variants': sum(len(b['variants']) for b in base_menus.values()),
-        'avg_variants_per_base': sum(len(b['variants']) for b in base_menus.values()) / len(base_menus) if base_menus else 0,
+        'avg_variants_per_base': sum(len(b['variants']) for b in base_menus.values())
+        / len(base_menus)
+        if base_menus
+        else 0,
         'max_variants': max(len(b['variants']) for b in base_menus.values()) if base_menus else 0,
     }
 
@@ -171,7 +176,7 @@ class FoodDBIntegrator:
 
     def __init__(self):
         self.settings = get_settings()
-        self.food_names: Set[str] = set()
+        self.food_names: set[str] = set()
         self.stats = {
             'food_db_total': 0,
             'food_db_excluded_category': 0,
@@ -182,9 +187,9 @@ class FoodDBIntegrator:
             'processed_db_excluded_pattern': 0,
             'processed_db_included': 0,
         }
-        self.excluded_category_counts: Dict[str, int] = {}
+        self.excluded_category_counts: dict[str, int] = {}
 
-    def _find_file(self, pattern: str) -> Optional[str]:
+    def _find_file(self, pattern: str) -> str | None:
         """파일 자동 탐색"""
         search_patterns = [
             os.path.join(self.settings.data_dir, pattern),
@@ -200,13 +205,19 @@ class FoodDBIntegrator:
         """음식명 정제"""
         if not name:
             return ''
-        name = re.sub(r'\s*\([LRMSXFPG]+\)|\s*\(Tall\)|\(Grande\)|\(Venti\)|\(Mini Venti\)', '', name)
-        name = re.sub(r'\s*\(초대용량\)|\(빅사이즈\)|\(1인\)|\(2인\)|\s*\(Solo\)|\(Double\)|\(Triple\)', '', name)
+        name = re.sub(
+            r'\s*\([LRMSXFPG]+\)|\s*\(Tall\)|\(Grande\)|\(Venti\)|\(Mini Venti\)', '', name
+        )
+        name = re.sub(
+            r'\s*\(초대용량\)|\(빅사이즈\)|\(1인\)|\(2인\)|\s*\(Solo\)|\(Double\)|\(Triple\)',
+            '',
+            name,
+        )
         name = re.sub(r'\s*아이스\s*\(ICED\)|\s*핫\s*\(HOT\)|\s*ICED|\s*HOT', '', name)
         name = re.sub(r'[^\uAC00-\uD7A3a-zA-Z0-9\s]', '', name)
         return re.sub(r'\s+', ' ', name).strip()
 
-    def _extract_category(self, raw_name: str) -> Optional[str]:
+    def _extract_category(self, raw_name: str) -> str | None:
         """카테고리 추출"""
         return raw_name.split('_', 1)[0].strip() if '_' in raw_name else None
 
@@ -219,18 +230,20 @@ class FoodDBIntegrator:
         """카테고리 정규화"""
         return re.sub(r'[()/\s]', '', category).lower() if category else ''
 
-    def _is_excluded_category(self, category: Optional[str]) -> bool:
+    def _is_excluded_category(self, category: str | None) -> bool:
         """제외 카테고리 여부"""
         if not category:
             return False
         normalized = self._normalize_category(category)
         for excluded in EXCLUDE_CATEGORIES:
             excluded_norm = excluded.lower()
-            if normalized == excluded_norm or (excluded_norm in normalized and len(excluded_norm) >= 3):
+            if normalized == excluded_norm or (
+                excluded_norm in normalized and len(excluded_norm) >= 3
+            ):
                 return True
         return False
 
-    def load_food_db(self, path: Optional[str]) -> None:
+    def load_food_db(self, path: str | None) -> None:
         """음식 DB 로드"""
         if not path or not os.path.exists(path):
             logger.warning('food_db_not_found', path=path)
@@ -238,9 +251,11 @@ class FoodDBIntegrator:
 
         logger.info('food_db_loading', path=path)
 
-        with open(path, 'r', encoding='utf-8-sig', newline='') as f:
+        with open(path, encoding='utf-8-sig', newline='') as f:
             for row in csv.DictReader(f):
-                raw_name = row.get('식품명', '') or row.get('food_name', '') or row.get('대표식품명', '')
+                raw_name = (
+                    row.get('식품명', '') or row.get('food_name', '') or row.get('대표식품명', '')
+                )
                 if not raw_name:
                     continue
                 self.stats['food_db_total'] += 1
@@ -256,7 +271,7 @@ class FoodDBIntegrator:
                 else:
                     self.stats['food_db_excluded_invalid'] += 1
 
-    def load_processed_db(self, path: Optional[str]) -> None:
+    def load_processed_db(self, path: str | None) -> None:
         """가공식품 DB 로드"""
         if not path or not os.path.exists(path):
             logger.warning('processed_db_not_found', path=path)
@@ -264,7 +279,7 @@ class FoodDBIntegrator:
 
         logger.info('processed_db_loading', path=path)
 
-        with open(path, 'r', encoding='utf-8-sig', newline='') as f:
+        with open(path, encoding='utf-8-sig', newline='') as f:
             for row in csv.DictReader(f):
                 raw_name = row.get('식품명', '') or row.get('food_name', '')
                 if not raw_name:

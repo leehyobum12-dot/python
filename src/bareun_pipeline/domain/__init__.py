@@ -15,10 +15,7 @@ Bareun Pipeline: Domain Package
 이 패키지의 모듈은 모두 가볍습니다 (Pydantic, 상수, 순수 함수).
 즉시 노출 방식을 유지합니다.
 """
-from .record import CertRecord
-from .dedup import generate_dedup_key, hash_phone
-from .privacy import redact_pii, get_pii_fields
-from .avoid_tags import generate_avoid_tags
+
 from .address import (
     ADDR_PATTERN,
     PROVINCE_CANON,
@@ -32,6 +29,10 @@ from .address import (
     norm_name,
     parse_addr_tokens,
 )
+from .avoid_tags import generate_avoid_tags
+from .dedup import generate_dedup_key, hash_phone
+from .privacy import get_pii_fields, redact_pii
+from .record import CertRecord
 
 __all__ = [
     # Models
@@ -44,8 +45,15 @@ __all__ = [
     # Domain Logic
     'generate_avoid_tags',
     # Address Utilities
-    'ADDR_PATTERN', 'PROVINCE_CANON', 'SIDO_ALIAS',
-    'canon_province', 'extract_emd_from_addr',
-    'is_emd_token', 'is_road_name', 'match_prefixes',
-    'norm_addr', 'norm_name', 'parse_addr_tokens',
+    'ADDR_PATTERN',
+    'PROVINCE_CANON',
+    'SIDO_ALIAS',
+    'canon_province',
+    'extract_emd_from_addr',
+    'is_emd_token',
+    'is_road_name',
+    'match_prefixes',
+    'norm_addr',
+    'norm_name',
+    'parse_addr_tokens',
 ]

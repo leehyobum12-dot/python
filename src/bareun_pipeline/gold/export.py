@@ -16,26 +16,27 @@ Gold Layer: 데이터 내보내기
 - NDJSON + CSV 이중 출력
 - GoldExporter 클래스로 캡슐화
 """
+
 from __future__ import annotations
 
 import csv
 import json
 import os
 from datetime import datetime
-from typing import List, Optional, TypedDict
+from typing import TypedDict
 
-from .transform import GoldRestaurant
 from ..observability.logging import get_logger
 from ..settings import get_settings
-
+from .transform import GoldRestaurant
 
 logger = get_logger(__name__)
 
 
 class ExportResult(TypedDict):
     """내보내기 결과"""
-    ndjson_path: Optional[str]
-    csv_path: Optional[str]
+
+    ndjson_path: str | None
+    csv_path: str | None
     count: int
 
 
@@ -53,21 +54,36 @@ class GoldExporter:
 
     # CSV 컬럼 정의
     CSV_FIELDNAMES = [
-        'dedup_key', 'data_source', 'store_name',
-        'province', 'municipality', 'emd',
-        'address_road', 'address_lotnum',
-        'lat', 'lng',
-        'main_menu', 'main_menu_source',
-        'menus', 'menus_source',
-        'phone', 'biz_type',
-        'certs', 'designated_at',
-        'cuisine_tags', 'nutrient_tags', 'cooking_tags',
-        'ingredient_tags', 'regional_tags', 'allergen_tags',
-        'occasion_tags', 'avoid_tags',
+        'dedup_key',
+        'data_source',
+        'store_name',
+        'province',
+        'municipality',
+        'emd',
+        'address_road',
+        'address_lotnum',
+        'lat',
+        'lng',
+        'main_menu',
+        'main_menu_source',
+        'menus',
+        'menus_source',
+        'phone',
+        'biz_type',
+        'certs',
+        'designated_at',
+        'cuisine_tags',
+        'nutrient_tags',
+        'cooking_tags',
+        'ingredient_tags',
+        'regional_tags',
+        'allergen_tags',
+        'occasion_tags',
+        'avoid_tags',
         'quality_score',
     ]
 
-    def __init__(self, gold_dir: Optional[str] = None):
+    def __init__(self, gold_dir: str | None = None):
         """
         GoldExporter 초기화
 
@@ -90,8 +106,8 @@ class GoldExporter:
 
     def export_ndjson(
         self,
-        records: List[GoldRestaurant],
-        filename: Optional[str] = None,
+        records: list[GoldRestaurant],
+        filename: str | None = None,
     ) -> str:
         """
         NDJSON 형식으로 내보내기 (Supabase 적재용)
@@ -119,8 +135,8 @@ class GoldExporter:
 
     def export_csv(
         self,
-        records: List[GoldRestaurant],
-        filename: Optional[str] = None,
+        records: list[GoldRestaurant],
+        filename: str | None = None,
         with_bom: bool = True,
     ) -> str:
         """
@@ -187,8 +203,8 @@ class GoldExporter:
 
     def export_dual(
         self,
-        records: List[GoldRestaurant],
-        filename_base: Optional[str] = None,
+        records: list[GoldRestaurant],
+        filename_base: str | None = None,
     ) -> ExportResult:
         """
         NDJSON + CSV 이중 출력
@@ -214,7 +230,7 @@ class GoldExporter:
         }
 
 
-def export_records(records: List[GoldRestaurant], dual: bool = True) -> ExportResult:
+def export_records(records: list[GoldRestaurant], dual: bool = True) -> ExportResult:
     """레코드 내보내기 (편의 함수)"""
     exporter = GoldExporter()
     if dual:

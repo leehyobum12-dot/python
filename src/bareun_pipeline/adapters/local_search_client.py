@@ -7,10 +7,11 @@ Bareun Pipeline: Local Search Adapter Client
 
 이관 출처: silver/enrich.py (StoreNameVerifier, MenuEnricher, StoreInfoEnricher의 API 호출 부분)
 """
+
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -38,7 +39,7 @@ class LocalSearchAdapter:
         query: str,
         client: httpx.AsyncClient,
         display: int = 3,
-    ) -> Optional[str]:
+    ) -> str | None:
         """네이버 로컬 검색에서 첫 번째 결과의 제목 반환 (가게명 검증용)"""
         items = await self._search_naver_raw(query, client, display)
         if not items:
@@ -112,7 +113,7 @@ class LocalSearchAdapter:
         query: str,
         client: httpx.AsyncClient,
         size: int = 3,
-    ) -> Optional[str]:
+    ) -> str | None:
         """카카오 키워드 검색에서 첫 번째 결과의 장소명 반환 (가게명 검증용)"""
         documents = await self._search_kakao_raw(query, client, size)
         if not documents:

@@ -7,17 +7,18 @@ NER 모델 학습을 위한 모듈입니다.
 매우 무거운 의존성을 포함합니다.
 실제로 사용할 때만 import되도록 lazy loading을 적용합니다.
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
 import importlib
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .data_generator import generate_dataset, save_dataset
     from .label_real_data import is_valid_menu, tokenize_and_label
-    from .verify_labels import verify_sample
     from .retrain_manager import mix_datasets
     from .trainer import train_ner_model
+    from .verify_labels import verify_sample
 
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
@@ -47,10 +48,10 @@ def __dir__() -> list[str]:
 
 __all__ = [
     'generate_dataset',
-    'save_dataset',
     'is_valid_menu',
-    'tokenize_and_label',
-    'verify_sample',
     'mix_datasets',
+    'save_dataset',
+    'tokenize_and_label',
     'train_ner_model',
+    'verify_sample',
 ]

@@ -16,21 +16,44 @@ store_name_quality 예시:
     'valid'          - 검증 완료 (또는 검증 불필요)
     'needs_verify'   - 네이버/카카오 검증 필요
 """
+
 from __future__ import annotations
 
 import re
-from typing import List, Optional
-
 
 # ═══════════════════════════════════════════════════════════
 # 알레르기 매핑 (메뉴 기반)
 # ═══════════════════════════════════════════════════════════
 
 ALLERGEN_MAPPING = {
-    '갑각류·조개류': ['갑각류', '조개류', '새우', '게', '랍스터', '오징어', '문어',
-                    '굴', '조개', '홍합', '전복', '가리비'],
-    '생선·연체류': ['생선', '연체류', '고등어', '갈치', '꽁치', '삼치', '조기',
-                   '장어', '민어', '참치', '연어', '멸치'],
+    '갑각류·조개류': [
+        '갑각류',
+        '조개류',
+        '새우',
+        '게',
+        '랍스터',
+        '오징어',
+        '문어',
+        '굴',
+        '조개',
+        '홍합',
+        '전복',
+        '가리비',
+    ],
+    '생선·연체류': [
+        '생선',
+        '연체류',
+        '고등어',
+        '갈치',
+        '꽁치',
+        '삼치',
+        '조기',
+        '장어',
+        '민어',
+        '참치',
+        '연어',
+        '멸치',
+    ],
     '육류': ['돼지', '소', '닭', '오리', '양', '염소', '말고기'],
     '곡류·두류': ['밀', '보리', '쌀', '콩', '두부', '메밀', '귀리', '호밀'],
     '견과류': ['땅콩', '호두', '아몬드', '캐슈넛', '피스타치오', '헤이즐넛'],
@@ -41,9 +64,29 @@ ALLERGEN_MAPPING = {
 }
 
 # 글루텐 매핑
-GLUTEN_KEYWORDS = ['밀', '보리', '호밀', '귀리', '빵', '면', '국수', '파스타',
-                   '떡볶이', '칼국수', '우동', '소바', '라면', '짜장면', '짬뽕',
-                   '피자', '햄버거', '샌드위치', '케이크', '쿠키', '빵류']
+GLUTEN_KEYWORDS = [
+    '밀',
+    '보리',
+    '호밀',
+    '귀리',
+    '빵',
+    '면',
+    '국수',
+    '파스타',
+    '떡볶이',
+    '칼국수',
+    '우동',
+    '소바',
+    '라면',
+    '짜장면',
+    '짬뽕',
+    '피자',
+    '햄버거',
+    '샌드위치',
+    '케이크',
+    '쿠키',
+    '빵류',
+]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -71,19 +114,19 @@ GENERIC_NAME_PATTERNS = [
 
 # 특수문자/깨진 데이터 패턴
 SUSPICIOUS_PATTERNS = [
-    r'[?？]',         # 물음표 포함
-    r'^\d+$',         # 숫자만
+    r'[?？]',  # 물음표 포함
+    r'^\d+$',  # 숫자만
     r'^[ㄱ-ㅎㅏ-ㅣ]+$',  # 자음/모음만
-    r'^[A-Za-z\s]+$', # 영문만 (한글 없음)
+    r'^[A-Za-z\s]+$',  # 영문만 (한글 없음)
 ]
 
 
 def generate_avoid_tags(
-    allergen_tags: Optional[List[str]],
-    biz_type: Optional[str] = None,
-    main_menu: Optional[str] = None,
-    menus: Optional[List[str]] = None,
-) -> List[str]:
+    allergen_tags: list[str] | None,
+    biz_type: str | None = None,
+    main_menu: str | None = None,
+    menus: list[str] | None = None,
+) -> list[str]:
     """
     알레르기 기반 avoid_tags 생성
 
@@ -96,7 +139,7 @@ def generate_avoid_tags(
     Returns:
         알레르기 회피 태그 목록
     """
-    avoid_tags: List[str] = []
+    avoid_tags: list[str] = []
 
     # 1. allergen_tags에서 직접 추출
     if allergen_tags:
@@ -125,9 +168,9 @@ def generate_avoid_tags(
 
 
 def assess_store_name_quality(
-    store_name: Optional[str],
-    province: Optional[str] = None,
-    municipality: Optional[str] = None,
+    store_name: str | None,
+    province: str | None = None,
+    municipality: str | None = None,
 ) -> str:
     """
     가게 이름 품질 평가
@@ -187,12 +230,12 @@ def needs_store_verification(store_name_quality: str) -> bool:
 
 
 def build_search_query(
-    province: Optional[str],
-    municipality: Optional[str],
-    emd: Optional[str],
-    address_road: Optional[str],
-    biz_type: Optional[str],
-    store_name: Optional[str],
+    province: str | None,
+    municipality: str | None,
+    emd: str | None,
+    address_road: str | None,
+    biz_type: str | None,
+    store_name: str | None,
 ) -> str:
     """
     네이버/카카오 지도 검색 쿼리 생성

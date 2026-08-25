@@ -19,26 +19,26 @@ NLP: 하이브리드 메뉴 추출기 (다차원 신뢰도)
 - 구조화 로깅
 - TypedDict로 반환 타입 명시
 """
+
 from __future__ import annotations
 
-import asyncio
 import difflib
 import re
-from typing import List, Dict, Optional, TypedDict
+from typing import TypedDict
 
-from .ner.predictor import MenuNERPredictor
-from .llm.verifier import LLMVerifier
 from ..domain.constants import COOKING_SUFFIXES, INGREDIENT_NOUNS
-from ..settings import get_settings
 from ..observability.logging import get_logger
-
+from ..settings import get_settings
+from .llm.verifier import LLMVerifier
+from .ner.predictor import MenuNERPredictor
 
 logger = get_logger(__name__)
 
 
 class HybridExtractResult(TypedDict):
     """하이브리드 추출 결과"""
-    menus: List[str]
+
+    menus: list[str]
     confidence: float
     method: str
 
@@ -65,9 +65,7 @@ class HybridMenuExtractor:
 
     # ─────────────── 다차원 신뢰도 계산 ───────────────
 
-    def _calculate_confidence(
-        self, menus: List[str], text: str, store_name: str
-    ) -> float:
+    def _calculate_confidence(self, menus: list[str], text: str, store_name: str) -> float:
         """
         다차원 신뢰도 점수 계산
 
@@ -143,9 +141,7 @@ class HybridMenuExtractor:
         similarity = difflib.SequenceMatcher(None, menu, store_name).ratio()
         return similarity >= self.settings.store_similarity_threshold
 
-    def _filter_store_from_menus(
-        self, menus: List[str], store_name: str
-    ) -> List[str]:
+    def _filter_store_from_menus(self, menus: list[str], store_name: str) -> list[str]:
         """
         메뉴 목록에서 가게명 제거
 
@@ -156,16 +152,11 @@ class HybridMenuExtractor:
         Returns:
             필터링된 메뉴 목록
         """
-        return [
-            m for m in menus
-            if m and not self._is_similar_to_store(m, store_name)
-        ]
+        return [m for m in menus if m and not self._is_similar_to_store(m, store_name)]
 
     # ─────────────── 메인 추출 ───────────────
 
-    async def extract_menus(
-        self, text: str, store_name: str
-    ) -> HybridExtractResult:
+    async def extract_menus(self, text: str, store_name: str) -> HybridExtractResult:
         """
         하이브리드 메뉴 추출
 
@@ -186,14 +177,10 @@ class HybridMenuExtractor:
         menus = ner_result.get('menus', [])
 
         # 가게명 필터링 + 최소 길이
-        filtered_menus = [
-            m for m in menus if m != store_name and len(m) >= 2
-        ]
+        filtered_menus = [m for m in menus if m != store_name and len(m) >= 2]
 
         # 다차원 신뢰도 계산
-        confidence = self._calculate_confidence(
-            filtered_menus, text, store_name
-        )
+        confidence = self._calculate_confidence(filtered_menus, text, store_name)
 
         # 신뢰도 높으면 NER 결과 사용 (LLM 호출 안 함)
         if confidence >= self.settings.llm_verify_threshold and filtered_menus:
@@ -212,13 +199,8 @@ class HybridMenuExtractor:
                 self.llm_call_count += 1
 
                 # '없음' 필터링 + 가게명 필터링
-                llm_menus = [
-                    m for m in llm_menus
-                    if m and m != '없음' and m.strip()
-                ]
-                llm_menus = self._filter_store_from_menus(
-                    llm_menus, store_name
-                )
+                llm_menus = [m for m in llm_menus if m and m != '없음' and m.strip()]
+                llm_menus = self._filter_store_from_menus(llm_menus, store_name)
 
                 if llm_menus:
                     return {

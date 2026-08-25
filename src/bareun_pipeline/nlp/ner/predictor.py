@@ -9,19 +9,19 @@ NLP: NER 모델 추론기 (KLUE-RoBERTa)
 - predict() 반환 타입을 TypedDict로 명시
 - all_entities 타입 호환성 해결
 """
+
 from __future__ import annotations
 
 import json
 import os
-from typing import Optional, Dict, List, Any, TypedDict
+from typing import TypedDict
 
 import torch
 from transformers import AutoModelForTokenClassification, AutoTokenizer
 
-from .postprocessor import NERPostprocessor
-from ...settings import get_settings
 from ...observability.logging import get_logger
-
+from ...settings import get_settings
+from .postprocessor import NERPostprocessor
 
 logger = get_logger(__name__)
 
@@ -30,17 +30,20 @@ logger = get_logger(__name__)
 # 반환 타입 정의 (TypedDict)
 # ═══════════════════════════════════════════════════════════
 
+
 class EntityDict(TypedDict):
     """개체 딕셔너리"""
+
     text: str
     type: str
 
 
 class PredictResult(TypedDict):
     """predict() 반환 타입"""
-    stores: List[str]
-    menus: List[str]
-    all_entities: List[EntityDict]
+
+    stores: list[str]
+    menus: list[str]
+    all_entities: list[EntityDict]
 
 
 class MenuNERPredictor:
@@ -52,7 +55,7 @@ class MenuNERPredictor:
     - _model_available 플래그로 폴백 처리
     """
 
-    def __init__(self, model_path: Optional[str] = None):
+    def __init__(self, model_path: str | None = None):
         self.settings = get_settings()
 
         if model_path is None:
@@ -80,7 +83,7 @@ class MenuNERPredictor:
 
             # 라벨 정보 로드
             label_info_path = os.path.join(model_path, 'label_info.json')
-            with open(label_info_path, 'r', encoding='utf-8') as f:
+            with open(label_info_path, encoding='utf-8') as f:
                 label_info = json.load(f)
             self.label2id = label_info['label2id']
             self.id2label = {int(k): v for k, v in label_info['id2label'].items()}
@@ -156,19 +159,15 @@ class MenuNERPredictor:
             predictions = torch.argmax(outputs.logits, dim=-1)[0].tolist()
 
         # 엔티티 추출
-        tokens = self.tokenizer.convert_ids_to_tokens(
-            inputs['input_ids'][0]
-        )
+        tokens = self.tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
         word_ids = inputs.word_ids(0)
 
-        entities: List[EntityDict] = []
+        entities: list[EntityDict] = []
         current_entity = ''
-        current_label: Optional[str] = None
-        prev_word_id: Optional[int] = None
+        current_label: str | None = None
+        prev_word_id: int | None = None
 
-        for token, label_id, word_id in zip(
-            tokens, predictions, word_ids
-        ):
+        for token, label_id, word_id in zip(tokens, predictions, word_ids, strict=False):
             if word_id is None:
                 continue
 
@@ -177,10 +176,12 @@ class MenuNERPredictor:
             if label.startswith('B-'):
                 # 새 엔티티 시작
                 if current_entity:
-                    entities.append({
-                        'text': current_entity,
-                        'type': current_label or 'UNKNOWN',
-                    })
+                    entities.append(
+                        {
+                            'text': current_entity,
+                            'type': current_label or 'UNKNOWN',
+                        }
+                    )
                 current_entity = token.replace('##', '')
                 current_label = label[2:]
             elif label.startswith('I-') and current_label == label[2:]:
@@ -191,10 +192,12 @@ class MenuNERPredictor:
             else:
                 # 엔티티 종료
                 if current_entity:
-                    entities.append({
-                        'text': current_entity,
-                        'type': current_label or 'UNKNOWN',
-                    })
+                    entities.append(
+                        {
+                            'text': current_entity,
+                            'type': current_label or 'UNKNOWN',
+                        }
+                    )
                 current_entity = ''
                 current_label = None
 
@@ -202,22 +205,20 @@ class MenuNERPredictor:
 
         # 마지막 엔티티 저장
         if current_entity:
-            entities.append({
-                'text': current_entity,
-                'type': current_label or 'UNKNOWN',
-            })
+            entities.append(
+                {
+                    'text': current_entity,
+                    'type': current_label or 'UNKNOWN',
+                }
+            )
 
         # 타입별 분류
         stores = [e['text'] for e in entities if e['type'] == 'STORE']
         menus = [e['text'] for e in entities if e['type'] == 'MENU']
 
         # 후처리 적용 (store_name 전달)
-        stores = self.postprocessor.process(
-            stores, entity_type='store', store_name=store_name
-        )
-        menus = self.postprocessor.process(
-            menus, entity_type='menu', store_name=store_name
-        )
+        stores = self.postprocessor.process(stores, entity_type='store', store_name=store_name)
+        menus = self.postprocessor.process(menus, entity_type='menu', store_name=store_name)
 
         return {
             'stores': stores,

@@ -13,13 +13,13 @@ PII (개인정보) 마스킹 모듈
 - 기존: PII_FIELDS를 raw_archiver.py에 하드코딩
 - 개선: 어댑터 클래스의 pii_fields 속성에서 동적 수집 + 범용 필드 통합
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Set
-
+from typing import Any
 
 # ─────────────── 범용 PII 필드 (모든 소스 공통) ───────────────
-UNIVERSAL_PII_FIELDS: Set[str] = {
+UNIVERSAL_PII_FIELDS: set[str] = {
     # 대표자/영업자
     'PRSDNT_NM',
     'REPRESENT',
@@ -28,14 +28,12 @@ UNIVERSAL_PII_FIELDS: Set[str] = {
     '대표자명',
     '영업자명',
     '대표자실명',
-
     # 사업자/종사자 식별번호
     'BRN',
     'BIZ_REG_NO',
     'WRKR_REG_NO',
     '사업자등록번호',
     '종사자등록번호',
-
     # 개인 연락처 (식당 영업전화와 구분 필요)
     '개인전화',
     '핸드폰',
@@ -44,16 +42,16 @@ UNIVERSAL_PII_FIELDS: Set[str] = {
 
 # ─────────────── 어댑터별 PII 필드 ───────────────
 # 기존 storage/raw_archiver.py의 PII_FIELDS 보존
-PII_FIELDS_BY_SOURCE: Dict[str, Set[str]] = {
+PII_FIELDS_BY_SOURCE: dict[str, set[str]] = {
     'safe_restaurant': {
         'RELAX_RSTRNT_REPRESENT',  # 대표자 실명
     },
     'food_safety': {
-        'PRSDNT_NM',               # 대표자명
-        'WRKR_REG_NO',             # 종사자 등록번호
+        'PRSDNT_NM',  # 대표자명
+        'WRKR_REG_NO',  # 종사자 등록번호
     },
     'low_sodium': {
-        'RPRS_NM',                 # 대표자명
+        'RPRS_NM',  # 대표자명
     },
     'model_restaurant': {
         '대표자명',
@@ -64,7 +62,7 @@ PII_FIELDS_BY_SOURCE: Dict[str, Set[str]] = {
 PII_MASK = '[비식별화]'
 
 
-def get_pii_fields(source: str) -> Set[str]:
+def get_pii_fields(source: str) -> set[str]:
     """
     소스별 PII 필드 목록 반환
 
@@ -79,7 +77,7 @@ def get_pii_fields(source: str) -> Set[str]:
     return fields
 
 
-def register_pii_fields(source: str, fields: Set[str]) -> None:
+def register_pii_fields(source: str, fields: set[str]) -> None:
     """
     어댑터별 PII 필드 동적 등록
 
@@ -94,7 +92,7 @@ def register_pii_fields(source: str, fields: Set[str]) -> None:
     PII_FIELDS_BY_SOURCE[source].update(fields)
 
 
-def redact_pii(rows: List[Dict[str, Any]], source: str) -> List[Dict[str, Any]]:
+def redact_pii(rows: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
     """
     원본 데이터에서 PII 필드 마스킹
 
@@ -117,7 +115,7 @@ def redact_pii(rows: List[Dict[str, Any]], source: str) -> List[Dict[str, Any]]:
 
         masked_row = dict(row)
         for key in pii_fields:
-            if key in masked_row and masked_row[key]:
+            if masked_row.get(key):
                 masked_row[key] = PII_MASK
 
         result.append(masked_row)
@@ -136,6 +134,7 @@ def hash_phone_for_storage(phone: str) -> str:
         salted SHA-256 해시 (16자리)
     """
     from .dedup import hash_phone
+
     return hash_phone(phone)
 
 

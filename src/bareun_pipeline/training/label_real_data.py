@@ -19,44 +19,128 @@
 - 구조화 로깅
 - 타입 안전성 강화
 """
+
 from __future__ import annotations
 
 import json
 import os
 import re
-from typing import List, Dict, Tuple
 
 from ..observability.logging import get_logger
-
 
 logger = get_logger(__name__)
 
 
 # ─────────────── 쓰레기 필터 패턴 ───────────────
 SENTENCE_INDICATORS = [
-    '이', '가', '을', '를', '은', '는', '에', '에서', '하고',
-    '더한', '이나', '장소', '입니다', '했어요', '했습니다',
-    '맛있', '추천', '주문', '시켰', '먹었', '다녀왔',
+    '이',
+    '가',
+    '을',
+    '를',
+    '은',
+    '는',
+    '에',
+    '에서',
+    '하고',
+    '더한',
+    '이나',
+    '장소',
+    '입니다',
+    '했어요',
+    '했습니다',
+    '맛있',
+    '추천',
+    '주문',
+    '시켰',
+    '먹었',
+    '다녀왔',
 ]
 
 LOCATION_NAMES = {
-    '제주', '서귀포', '제주시', '안덕', '대정', '표선', '성산',
-    '조천', '한림', '애월', '중문', '노형', '연동', '함덕',
-    '서울', '부산', '대구', '인천', '광주', '대전', '울산',
-    '파주시', '군포시', '수원시', '고양시',
+    '제주',
+    '서귀포',
+    '제주시',
+    '안덕',
+    '대정',
+    '표선',
+    '성산',
+    '조천',
+    '한림',
+    '애월',
+    '중문',
+    '노형',
+    '연동',
+    '함덕',
+    '서울',
+    '부산',
+    '대구',
+    '인천',
+    '광주',
+    '대전',
+    '울산',
+    '파주시',
+    '군포시',
+    '수원시',
+    '고양시',
 }
 
 GENERIC_NOUNS = {
-    '메뉴', '레스토랑', '식당', '카페', '가게', '장소', '분위기',
-    '서비스', '가격', '위치', '주차', '영업시간', '예약', '주문',
-    '비코스', '코스', '세트', '정식',
-    '요리', '음식', '식사', '간식', '안주',
-    '오', '전', '후', '중', '때', '쯤', '여기', '저기',
-    '본점', '분점', '지점', '호점', '센터', '마트',
-    '추천', '후기', '리뷰', '방문', '다녀온',
-    '사진', '영상', '글', '포스팅', '블로그',
-    '술', '안주', '음료', '주류', '맥주', '소주',
-    '통가죽', '페파민트', '합성색소', '베이글',
+    '메뉴',
+    '레스토랑',
+    '식당',
+    '카페',
+    '가게',
+    '장소',
+    '분위기',
+    '서비스',
+    '가격',
+    '위치',
+    '주차',
+    '영업시간',
+    '예약',
+    '주문',
+    '비코스',
+    '코스',
+    '세트',
+    '정식',
+    '요리',
+    '음식',
+    '식사',
+    '간식',
+    '안주',
+    '오',
+    '전',
+    '후',
+    '중',
+    '때',
+    '쯤',
+    '여기',
+    '저기',
+    '본점',
+    '분점',
+    '지점',
+    '호점',
+    '센터',
+    '마트',
+    '추천',
+    '후기',
+    '리뷰',
+    '방문',
+    '다녀온',
+    '사진',
+    '영상',
+    '글',
+    '포스팅',
+    '블로그',
+    '술',
+    '음료',
+    '주류',
+    '맥주',
+    '소주',
+    '통가죽',
+    '페파민트',
+    '합성색소',
+    '베이글',
 }
 
 AMBIGUOUS_SHORT = {'코스', '세트', '정식', '모듬', '특선'}
@@ -65,7 +149,7 @@ MENU_MAX_LENGTH = 15
 MENU_MIN_LENGTH = 2
 
 
-def load_real_data(real_data_log: str) -> List[Dict]:
+def load_real_data(real_data_log: str) -> list[dict]:
     """
     실전 데이터 로드
 
@@ -75,14 +159,14 @@ def load_real_data(real_data_log: str) -> List[Dict]:
     Returns:
         로드된 데이터 목록
     """
-    records: List[Dict] = []
+    records: list[dict] = []
     seen_texts = set()  # 중복 제거
 
     if not os.path.exists(real_data_log):
         logger.warning('real_data_log_not_found', path=real_data_log)
         return []
 
-    with open(real_data_log, 'r', encoding='utf-8') as f:
+    with open(real_data_log, encoding='utf-8') as f:
         for line in f:
             if not line.strip():
                 continue
@@ -101,7 +185,7 @@ def load_real_data(real_data_log: str) -> List[Dict]:
     return records
 
 
-def is_valid_menu(menu: str, store_name: str) -> Tuple[bool, str]:
+def is_valid_menu(menu: str, store_name: str) -> tuple[bool, str]:
     """
     메뉴 유효성 검증 (쓰레기 필터링)
 
@@ -161,11 +245,7 @@ def is_valid_menu(menu: str, store_name: str) -> Tuple[bool, str]:
     return True, '유효'
 
 
-def tokenize_and_label(
-    text: str,
-    store_name: str,
-    valid_menus: List[str]
-) -> Dict:
+def tokenize_and_label(text: str, store_name: str, valid_menus: list[str]) -> dict:
     """
     공백 기준 토큰화 + BIO 태깅
 
@@ -192,7 +272,7 @@ def tokenize_and_label(
     for menu in valid_menus:
         menu_tokens = menu.split()
         for i in range(len(tokens) - len(menu_tokens) + 1):
-            if tokens[i:i + len(menu_tokens)] == menu_tokens:
+            if tokens[i : i + len(menu_tokens)] == menu_tokens:
                 labels[i] = 'B-MENU'
                 for j in range(1, len(menu_tokens)):
                     labels[i + j] = 'I-MENU'

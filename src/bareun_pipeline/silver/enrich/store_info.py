@@ -8,6 +8,7 @@ Bareun Pipeline: Silver Enrichment - Store Info Enrichment
 
 이관 출처: silver/enrich.py (StoreInfoEnricher)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,12 +17,11 @@ import os
 import re
 import threading
 from datetime import datetime
-from typing import Optional
 
 import httpx
 
-from ...domain.record import CertRecord
 from ...adapters.local_search_client import LocalSearchAdapter
+from ...domain.record import CertRecord
 from ...observability.logging import get_logger
 from ...settings import get_settings
 
@@ -31,6 +31,7 @@ logger = get_logger(__name__)
 # ═══════════════════════════════════════════════════════════
 # 캐시
 # ═══════════════════════════════════════════════════════════
+
 
 class StoreInfoCache:
     """가게 정보 보강 캐시 (파일 기반)"""
@@ -61,7 +62,7 @@ class StoreInfoCache:
         except Exception as e:
             logger.warning('store_info_cache_save_failed', error=str(e))
 
-    def get(self, key: str) -> Optional[dict]:
+    def get(self, key: str) -> dict | None:
         with self._lock:
             return self._cache.get(key)
 
@@ -73,6 +74,7 @@ class StoreInfoCache:
 # ═══════════════════════════════════════════════════════════
 # 가게 정보 보강 서비스
 # ═══════════════════════════════════════════════════════════
+
 
 class StoreInfoEnrichService:
     """가게 정보 보강 서비스 (어댑터 오케스트레이션)"""
@@ -133,18 +135,20 @@ class StoreInfoEnrichService:
 
             chunk_size = 20
             for i in range(0, len(records), chunk_size):
-                chunk = records[i:i + chunk_size]
+                chunk = records[i : i + chunk_size]
                 await asyncio.gather(*[enrich_one(r) for r in chunk])
                 logger.info(
                     'store_info_enrich_progress',
                     processed=min(i + chunk_size, len(records)),
-                    total=len(records), enriched=enriched_count,
+                    total=len(records),
+                    enriched=enriched_count,
                 )
 
         self.cache.save()
         logger.info(
             'store_info_enrich_complete',
-            enriched=enriched_count, total=len(records),
+            enriched=enriched_count,
+            total=len(records),
         )
         return records
 
@@ -154,7 +158,8 @@ class StoreInfoEnrichService:
         kakao_task = asyncio.create_task(self._fetch_kakao_info(client, query))
 
         done, pending = await asyncio.wait(
-            [naver_task, kakao_task], return_when=asyncio.FIRST_COMPLETED,
+            [naver_task, kakao_task],
+            return_when=asyncio.FIRST_COMPLETED,
         )
 
         result = {}
@@ -259,6 +264,7 @@ class StoreInfoEnrichService:
 # ═══════════════════════════════════════════════════════════
 # 진입점
 # ═══════════════════════════════════════════════════════════
+
 
 async def enrich_store_info(records: list[CertRecord]) -> list[CertRecord]:
     """가게 정보 보강 진입점"""

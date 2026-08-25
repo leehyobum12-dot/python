@@ -9,18 +9,18 @@ Gold Layer: Supabase 적재
 - 동적 청크 크기로 Supabase 타임아웃 방지
 - payload 크기에 따라 청크 크기 자동 조정
 """
+
 from __future__ import annotations
 
 import json
 import time
-from typing import List, Dict, Any, Optional
+from typing import Any
 
-from supabase import create_client, Client
+from supabase import Client, create_client
 
-from .transform import GoldRestaurant
 from ..observability.logging import get_logger
 from ..settings import get_settings
-
+from .transform import GoldRestaurant
 
 logger = get_logger(__name__)
 
@@ -38,14 +38,14 @@ class SupabaseLoader:
     """
 
     DEFAULT_CHUNK_SIZE = 500  # 기본 청크 크기
-    MIN_CHUNK_SIZE = 100      # 최소 청크 크기
-    MAX_CHUNK_SIZE = 1000     # 최대 청크 크기
-    MAX_RETRIES = 3           # 최대 재시도 횟수
+    MIN_CHUNK_SIZE = 100  # 최소 청크 크기
+    MAX_CHUNK_SIZE = 1000  # 최대 청크 크기
+    MAX_RETRIES = 3  # 최대 재시도 횟수
 
     # Supabase PostgREST의 안전한 payload 임계값 (5MB)
     MAX_PAYLOAD_SIZE = 5 * 1024 * 1024
 
-    def __init__(self, supabase_client: Optional[Client] = None):
+    def __init__(self, supabase_client: Client | None = None):
         self.settings = get_settings()
         self._supabase = supabase_client
 
@@ -59,7 +59,7 @@ class SupabaseLoader:
             )
         return self._supabase
 
-    def _calculate_chunk_size(self, records: List[GoldRestaurant]) -> int:
+    def _calculate_chunk_size(self, records: list[GoldRestaurant]) -> int:
         """
         payload 크기에 따른 동적 청크 크기 계산
 
@@ -77,9 +77,7 @@ class SupabaseLoader:
 
         # 첫 번째 레코드의 payload 크기 추정
         sample_payload = records[0].to_payload()
-        sample_size = len(
-            json.dumps(sample_payload, ensure_ascii=False).encode('utf-8')
-        )
+        sample_size = len(json.dumps(sample_payload, ensure_ascii=False).encode('utf-8'))
 
         if sample_size == 0:
             return self.DEFAULT_CHUNK_SIZE
@@ -99,7 +97,7 @@ class SupabaseLoader:
 
         return chunk_size
 
-    def load(self, records: List[GoldRestaurant]) -> Dict[str, Any]:
+    def load(self, records: list[GoldRestaurant]) -> dict[str, Any]:
         """
         Gold 레코드를 Supabase에 적재
 
@@ -116,16 +114,13 @@ class SupabaseLoader:
         logger.info('supabase_load_start', count=len(records))
 
         total_affected = 0
-        errors: List[Dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
 
         # 동적 청크 크기 계산
         chunk_size = self._calculate_chunk_size(records)
 
         # 청크 단위로 분할
-        chunks = [
-            records[i:i + chunk_size]
-            for i in range(0, len(records), chunk_size)
-        ]
+        chunks = [records[i : i + chunk_size] for i in range(0, len(records), chunk_size)]
 
         logger.info(
             'supabase_load_chunks_prepared',
@@ -158,10 +153,12 @@ class SupabaseLoader:
                     error=str(e),
                     error_type=type(e).__name__,
                 )
-                errors.append({
-                    'chunk': chunk_idx,
-                    'error': str(e),
-                })
+                errors.append(
+                    {
+                        'chunk': chunk_idx,
+                        'error': str(e),
+                    }
+                )
 
         # ANALYZE 실행 (인덱스 통계 갱신)
         try:
@@ -185,7 +182,7 @@ class SupabaseLoader:
 
         return result
 
-    def _load_chunk(self, chunk: List[GoldRestaurant]) -> int:
+    def _load_chunk(self, chunk: list[GoldRestaurant]) -> int:
         """
         단일 청크 적재 (재시도 포함)
 
@@ -197,7 +194,7 @@ class SupabaseLoader:
         """
         payload = [record.to_payload() for record in chunk]
 
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for attempt in range(self.MAX_RETRIES):
             try:
@@ -207,9 +204,9 @@ class SupabaseLoader:
                 ).execute()
 
                 affected = response.data
-                if isinstance(affected, (int, float)):
-                    return int(affected)
-                elif isinstance(affected, str) and affected.isdigit():
+                if isinstance(affected, (int, float)) or (
+                    isinstance(affected, str) and affected.isdigit()
+                ):
                     return int(affected)
                 else:
                     return 0
@@ -218,7 +215,7 @@ class SupabaseLoader:
                 last_error = e
 
                 if attempt < self.MAX_RETRIES - 1:
-                    wait = 2 ** attempt
+                    wait = 2**attempt
                     logger.warning(
                         'supabase_load_retry',
                         attempt=attempt + 1,
@@ -238,7 +235,7 @@ class SupabaseLoader:
         self.supabase.rpc('analyze_restaurants').execute()
 
 
-def load_records(records: List[GoldRestaurant]) -> Dict[str, Any]:
+def load_records(records: list[GoldRestaurant]) -> dict[str, Any]:
     """레코드 적재 (편의 함수)"""
     loader = SupabaseLoader()
     return loader.load(records)

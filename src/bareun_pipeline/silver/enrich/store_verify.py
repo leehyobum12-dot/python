@@ -13,22 +13,22 @@ Bareun Pipeline: Silver Enrichment - Store Name Verification
 수정 사항 (Autofix):
   - 미사용 임포트(`assess_store_name_quality`) 제거하여 Lint F401 경고 해소
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import os
 import threading
-from typing import Optional
 
 import httpx
 
-from ...domain.record import CertRecord
+from ...adapters.local_search_client import LocalSearchAdapter
 from ...domain.avoid_tags import (
     build_search_query,
     needs_store_verification,
 )
-from ...adapters.local_search_client import LocalSearchAdapter
+from ...domain.record import CertRecord
 from ...observability.logging import get_logger
 from ...settings import get_settings
 
@@ -39,12 +39,13 @@ logger = get_logger(__name__)
 # 캐시 관리
 # ═══════════════════════════════════════════════════════════
 
+
 class StoreVerifyCache:
     """가게명 검증 캐시 (파일 기반)"""
 
     def __init__(self, cache_path: str):
         self._path = cache_path
-        self._cache: dict[str, Optional[str]] = {}
+        self._cache: dict[str, str | None] = {}
         self._lock = threading.Lock()
         self._load()
 
@@ -68,11 +69,11 @@ class StoreVerifyCache:
         except Exception as e:
             logger.warning('store_verify_cache_save_failed', error=str(e))
 
-    def get(self, query: str) -> Optional[str]:
+    def get(self, query: str) -> str | None:
         with self._lock:
             return self._cache.get(query)
 
-    def set(self, query: str, result: Optional[str]) -> None:
+    def set(self, query: str, result: str | None) -> None:
         with self._lock:
             self._cache[query] = result
 
@@ -80,6 +81,7 @@ class StoreVerifyCache:
 # ═══════════════════════════════════════════════════════════
 # 검증 서비스 (어댑터 오케스트레이션)
 # ═══════════════════════════════════════════════════════════
+
 
 class StoreVerifyService:
     """가게 이름 검증 서비스"""
@@ -98,8 +100,7 @@ class StoreVerifyService:
     ) -> list[CertRecord]:
         """배치 가게명 검증"""
         needs_verification = [
-            r for r in records
-            if needs_store_verification(r.store_name_quality or 'valid')
+            r for r in records if needs_store_verification(r.store_name_quality or 'valid')
         ]
 
         if not needs_verification:
@@ -141,7 +142,8 @@ class StoreVerifyService:
                         verified_count += 1
                         logger.info(
                             'verify_store_name_updated',
-                            old_name=old_name, new_name=verified_name,
+                            old_name=old_name,
+                            new_name=verified_name,
                         )
                     else:
                         failed_count += 1
@@ -154,26 +156,26 @@ class StoreVerifyService:
 
             chunk_size = 20
             for i in range(0, len(needs_verification), chunk_size):
-                chunk = needs_verification[i:i + chunk_size]
+                chunk = needs_verification[i : i + chunk_size]
                 await asyncio.gather(*[verify_one(r) for r in chunk])
                 logger.info(
                     'verify_store_names_progress',
                     processed=min(i + chunk_size, len(needs_verification)),
                     total=len(needs_verification),
-                    verified=verified_count, failed=failed_count,
+                    verified=verified_count,
+                    failed=failed_count,
                 )
 
         self.cache.save()
         logger.info(
             'verify_store_names_complete',
-            verified=verified_count, failed=failed_count,
+            verified=verified_count,
+            failed=failed_count,
             total=len(needs_verification),
         )
         return records
 
-    async def _verify_store(
-        self, client: httpx.AsyncClient, query: str
-    ) -> Optional[str]:
+    async def _verify_store(self, client: httpx.AsyncClient, query: str) -> str | None:
         """단일 가게명 검증 (캐시 우선 + 어댑터 위임)"""
         cached = self.cache.get(query)
         if cached is not None:
@@ -217,6 +219,7 @@ class StoreVerifyService:
 # ═══════════════════════════════════════════════════════════
 # 진입점
 # ═══════════════════════════════════════════════════════════
+
 
 async def verify_store_names(records: list[CertRecord]) -> list[CertRecord]:
     """가게명 검증 진입점"""

@@ -14,16 +14,15 @@
 - PII 필드 명시적 정의
 - XML 파싱 에러 핸들링 강화
 """
+
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Optional, Tuple
 
-from .base import BaseAdapter, parse_addr_tokens
 from ..domain.record import CertRecord
 from ..observability.logging import get_logger
-
+from .base import BaseAdapter
 
 logger = get_logger(__name__)
 
@@ -65,8 +64,8 @@ class SafeRestaurantAdapter(BaseAdapter):
         self,
         start: int,
         end: int,
-        province: Optional[str],
-    ) -> Tuple[List[CertRecord], int, List[dict]]:
+        province: str | None,
+    ) -> tuple[list[CertRecord], int, list[dict]]:
         """
         단일 페이지 수집
 
@@ -101,8 +100,8 @@ class SafeRestaurantAdapter(BaseAdapter):
             rows = root.findall('.//row')
             total = int(root.findtext('totalCnt') or 0)
 
-            page_records: List[CertRecord] = []
-            page_raw_rows: List[dict] = []
+            page_records: list[CertRecord] = []
+            page_raw_rows: list[dict] = []
 
             for row in rows:
                 raw = {c.tag: (c.text or '').strip() for c in row}
@@ -156,7 +155,7 @@ class SafeRestaurantAdapter(BaseAdapter):
             )
             return [], 0, []
 
-    def collect(self, province: Optional[str] = None) -> List[CertRecord]:
+    def collect(self, province: str | None = None) -> list[CertRecord]:
         """
         데이터 수집
 
@@ -192,7 +191,7 @@ class SafeRestaurantAdapter(BaseAdapter):
             return valid_records
 
         # 나머지 페이지 병렬 수집
-        ranges: List[Tuple[int, int]] = []
+        ranges: list[tuple[int, int]] = []
         start = self.PAGE_SIZE + 1
         while start <= total:
             end = min(start + self.PAGE_SIZE - 1, total)
@@ -206,10 +205,7 @@ class SafeRestaurantAdapter(BaseAdapter):
         )
 
         with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
-            futures = {
-                executor.submit(self._fetch_page, s, e, province): (s, e)
-                for s, e in ranges
-            }
+            futures = {executor.submit(self._fetch_page, s, e, province): (s, e) for s, e in ranges}
             for future in as_completed(futures):
                 start_idx, end_idx = futures[future]
                 try:

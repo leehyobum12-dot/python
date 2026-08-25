@@ -11,12 +11,13 @@ Bronze Layer: Collection Orchestration
 - 메모리 누수 방지 (raw_rows 명시적 초기화)
 - Broad Exception 핸들링 구체화 및 exc_info=True로 스택 트레이스 보존
 """
+
 from __future__ import annotations
 
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 from ..adapters import get_all_adapters
 from ..adapters.base import BaseAdapter
@@ -33,16 +34,19 @@ logger = get_logger(__name__)
 # 결과 타입 정의 (TypedDict)
 # ═══════════════════════════════════════════════════════════
 
+
 class AdapterResult(TypedDict):
     """어댑터별 수집 결과"""
+
     records: int
     raw_rows: int
     status: str
-    error: Optional[str]
+    error: str | None
 
 
 class ProvinceResult(TypedDict):
     """시도별 수집 결과"""
+
     province: str
     run_id: str
     batch_id: str
@@ -53,6 +57,7 @@ class ProvinceResult(TypedDict):
 
 class NationwideResult(TypedDict):
     """전국 수집 결과"""
+
     run_id: str
     provinces: dict[str, ProvinceResult]
     total_records: int
@@ -88,14 +93,14 @@ class BronzeCollector:
     ) -> AdapterResult:
         """단일 어댑터 수집 (워커 함수)"""
         adapter_name = adapter_cls.__name__
-        source_name = getattr(adapter_cls, "source", adapter_name)
+        source_name = getattr(adapter_cls, 'source', adapter_name)
 
         try:
             adapter = adapter_cls()
             records = adapter.collect(province=province)
-            
+
             raw_count = len(adapter.raw_rows)
-            
+
             # 원본 데이터 보존 (Bronze Layer)
             if raw_count > 0:
                 self.archiver.archive(
@@ -105,7 +110,7 @@ class BronzeCollector:
                     batch_id=batch_id,
                 )
                 # 🐛 버그 수정: 메모리 누수 방지를 위해 명시적 초기화
-                if hasattr(adapter, "_clear_raw_rows"):
+                if hasattr(adapter, '_clear_raw_rows'):
                     adapter._clear_raw_rows()
                 else:
                     adapter.raw_rows = []
@@ -130,7 +135,7 @@ class BronzeCollector:
                 'records': 0,
                 'raw_rows': 0,
                 'status': 'failed',
-                'error': f"{type(e).__name__}: {str(e)}",
+                'error': f'{type(e).__name__}: {e!s}',
             }
 
     def collect_province(
@@ -167,9 +172,7 @@ class BronzeCollector:
 
         with ThreadPoolExecutor(max_workers=self.MAX_ADAPTER_WORKERS) as executor:
             futures = {
-                executor.submit(
-                    self._collect_one_adapter, cls, province, batch_id
-                ): cls.__name__
+                executor.submit(self._collect_one_adapter, cls, province, batch_id): cls.__name__
                 for cls in adapter_classes
             }
 
@@ -179,7 +182,7 @@ class BronzeCollector:
                     adapter_result = future.result()
                     result['adapters'][adapter_name] = adapter_result
                     result['total_records'] += adapter_result['records']
-                    
+
                     log.info(
                         'adapter_complete',
                         adapter=adapter_name,
@@ -189,8 +192,10 @@ class BronzeCollector:
                 except Exception as e:
                     log.error('adapter_unexpected_error', adapter=adapter_name, error=str(e))
                     result['adapters'][adapter_name] = {
-                        'records': 0, 'raw_rows': 0,
-                        'status': 'failed', 'error': str(e),
+                        'records': 0,
+                        'raw_rows': 0,
+                        'status': 'failed',
+                        'error': str(e),
                     }
 
         # 체크포인트 마커 저장
@@ -205,7 +210,7 @@ class BronzeCollector:
 
     def collect_nationwide(
         self,
-        provinces: Optional[list[str]] = None,
+        provinces: list[str] | None = None,
         force: bool = False,
     ) -> NationwideResult:
         """전국 시도 순회 수집"""
@@ -213,7 +218,9 @@ class BronzeCollector:
         run_id = str(uuid.uuid4())[:8]
         log = logger.bind(run_id=run_id)
 
-        log.info('collect_nationwide_start', provinces=target_provinces, count=len(target_provinces))
+        log.info(
+            'collect_nationwide_start', provinces=target_provinces, count=len(target_provinces)
+        )
 
         results: NationwideResult = {
             'run_id': run_id,
@@ -225,7 +232,12 @@ class BronzeCollector:
         }
 
         for i, province in enumerate(target_provinces, 1):
-            log.info('collect_nationwide_progress', current=i, total=len(target_provinces), province=province)
+            log.info(
+                'collect_nationwide_progress',
+                current=i,
+                total=len(target_provinces),
+                province=province,
+            )
 
             try:
                 province_result = self.collect_province(province, force=force)
@@ -240,8 +252,12 @@ class BronzeCollector:
             except Exception as e:
                 log.error('collect_province_unexpected_error', province=province, error=str(e))
                 results['provinces'][province] = {
-                    'province': province, 'run_id': run_id, 'batch_id': '',
-                    'adapters': {}, 'total_records': 0, 'skipped': False,
+                    'province': province,
+                    'run_id': run_id,
+                    'batch_id': '',
+                    'adapters': {},
+                    'total_records': 0,
+                    'skipped': False,
                 }
                 results['failed'] += 1
 

@@ -19,26 +19,23 @@
 - 구조화 로깅
 - 타입 안전성 강화
 """
+
 from __future__ import annotations
 
-import json
-import os
 import random
-from typing import List, Dict
 
 from ..observability.logging import get_logger
-
 
 logger = get_logger(__name__)
 
 
 def mix_datasets(
-    synthetic_train: List[Dict],
-    synthetic_val: List[Dict],
-    real_data: List[Dict],
+    synthetic_train: list[dict],
+    synthetic_val: list[dict],
+    real_data: list[dict],
     synthetic_ratio: float = 0.8,
     upsample_factor: int = 5,
-) -> Dict[str, List[Dict]]:
+) -> dict[str, list[dict]]:
     """
     합성 + 실전 데이터 혼합
 
@@ -79,10 +76,7 @@ def mix_datasets(
     )
 
     # train 혼합 (합성 80% + 실전 20%)
-    syn_train_sample = random.sample(
-        synthetic_train,
-        int(len(synthetic_train) * synthetic_ratio)
-    )
+    syn_train_sample = random.sample(synthetic_train, int(len(synthetic_train) * synthetic_ratio))
     mixed_train = syn_train_sample + real_upsampled
     random.shuffle(mixed_train)
 
@@ -93,7 +87,7 @@ def mix_datasets(
     random.shuffle(mixed_val)
 
     # test: 실전 5%
-    real_test = real_data[:max(1, int(len(real_data) * 0.05))]
+    real_test = real_data[: max(1, int(len(real_data) * 0.05))]
 
     logger.info(
         'mix_datasets_complete',

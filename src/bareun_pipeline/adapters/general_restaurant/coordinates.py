@@ -2,8 +2,9 @@
 # 파일 1: src/bareun_pipeline/adapters/general_restaurant/coordinates.py
 # ==============================================================================
 """좌표계 변환 유틸리티 (EPSG → WGS84)"""
+
 from __future__ import annotations
-from typing import Optional, Tuple
+
 from ...observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -24,7 +25,8 @@ EPSG_CANDIDATES = [
 KOREA_LAT_MIN, KOREA_LAT_MAX = 33.0, 38.7
 KOREA_LNG_MIN, KOREA_LNG_MAX = 124.5, 132.0
 
-def convert_to_wgs84(x: float, y: float) -> Tuple[Optional[float], Optional[float]]:
+
+def convert_to_wgs84(x: float, y: float) -> tuple[float | None, float | None]:
     """다양한 한국 좌표계를 WGS84(lat, lng)로 변환"""
     if 124.5 <= x <= 132.0 and 33.0 <= y <= 38.6:
         return y, x  # 이미 WGS84
@@ -44,6 +46,6 @@ def convert_to_wgs84(x: float, y: float) -> Tuple[Optional[float], Optional[floa
                 return lat, lng
         except Exception:
             continue
-            
+
     logger.warning('coordinate_convert_failed', x=x, y=y)
     return None, None

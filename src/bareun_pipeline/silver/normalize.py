@@ -20,14 +20,13 @@ Silver Layer: 데이터 정규화
 - 구조화 로깅
 - 타입 안전성 강화
 """
+
 from __future__ import annotations
 
 import re
-from typing import List, Optional, Dict
 
 from ..domain.record import CertRecord
 from ..observability.logging import get_logger
-
 
 logger = get_logger(__name__)
 
@@ -144,7 +143,7 @@ class Normalizer:
         return True
 
 
-def recover_damaged_names(records: List[CertRecord]) -> int:
+def recover_damaged_names(records: list[CertRecord]) -> int:
     """
     손상된 상호명 복구
 
@@ -159,8 +158,8 @@ def recover_damaged_names(records: List[CertRecord]) -> int:
     """
     normalizer = Normalizer()
 
-    addr_map: Dict[str, str] = {}
-    phone_map: Dict[str, str] = {}
+    addr_map: dict[str, str] = {}
+    phone_map: dict[str, str] = {}
 
     for r in records:
         if not normalizer.is_valid_name(r.raw_name):
@@ -198,7 +197,7 @@ def recover_damaged_names(records: List[CertRecord]) -> int:
     return recovered
 
 
-def _norm_phone(p: Optional[str]) -> str:
+def _norm_phone(p: str | None) -> str:
     """전화번호 정규화 (숫자만)"""
     return re.sub(r'\D', '', p or '')
 
@@ -209,12 +208,13 @@ def _norm_addr(addr: str) -> str:
     toks = s.split()
     if toks:
         from ..adapters.base import SIDO_ALIAS
+
         if toks[0] in SIDO_ALIAS:
             toks[0] = SIDO_ALIAS[toks[0]]
     return ''.join(toks).lower()
 
 
-def normalize_records(records: List[CertRecord]) -> List[CertRecord]:
+def normalize_records(records: list[CertRecord]) -> list[CertRecord]:
     """
     레코드 목록 정규화 (편의 함수)
 

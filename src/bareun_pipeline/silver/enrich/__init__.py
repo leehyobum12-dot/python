@@ -16,6 +16,7 @@ Architecture:
         ├── menu.py (Menu Extraction & Validation)
         └── store_info.py (Contact & Metadata Enrichment)
 """
+
 from __future__ import annotations
 
 from typing import List
@@ -34,21 +35,21 @@ logger = get_logger(__name__)
 
 __all__ = [
     # Main Orchestrator
-    "SilverEnricher",
+    'SilverEnricher',
     # Re-exported entry points for backward compatibility
-    "enrich_coordinates",
-    "verify_store_names",
-    "enrich_menus",
-    "enrich_store_info",
+    'enrich_coordinates',
+    'verify_store_names',
+    'enrich_menus',
+    'enrich_store_info',
 ]
 
 
 class SilverEnricher:
     """
     Silver Layer 통합 보강기 (Orchestrator)
-    
+
     기존 silver/enrich.py의 God Object를 대체합니다.
-    실제 I/O 및 무거운 로직은 하위 모듈에 위임하고, 
+    실제 I/O 및 무거운 로직은 하위 모듈에 위임하고,
     이 클래스는 실행 순서와 도메인 규칙(avoid_tags 등)만 통제합니다.
     """
 
@@ -61,22 +62,22 @@ class SilverEnricher:
 
     async def enrich(
         self,
-        records: List[CertRecord],
+        records: list[CertRecord],
         verify_store_names: bool = True,
         enrich_menus: bool = True,
         enrich_store_info: bool = True,
         force_geocoding: bool = False,
-    ) -> List[CertRecord]:
+    ) -> list[CertRecord]:
         """
         전체 보강 파이프라인 실행
-        
+
         Args:
             records: 보강 대상 레코드 목록
             verify_store_names: 가게명 검증 수행 여부
             enrich_menus: 메뉴 보강 수행 여부
             enrich_store_info: 가게 정보 보강 수행 여부
             force_geocoding: 기존 좌표 무시하고 강제 지오코딩 수행 여부
-            
+
         Returns:
             보강이 완료된 CertRecord 목록
         """
@@ -123,21 +124,22 @@ class SilverEnricher:
 # 하위 호환성을 위한 진입점 래퍼 (Legacy Entry Points)
 # ═══════════════════════════════════════════════════════════
 
-async def enrich_coordinates(records: List[CertRecord]) -> List[CertRecord]:
+
+async def enrich_coordinates(records: list[CertRecord]) -> list[CertRecord]:
     """지오코딩 단독 실행 (기존 인터페이스 호환)"""
     return await _enrich_coordinates(records)
 
 
-async def verify_store_names(records: List[CertRecord]) -> List[CertRecord]:
+async def verify_store_names(records: list[CertRecord]) -> list[CertRecord]:
     """가게명 검증 단독 실행 (기존 인터페이스 호환)"""
     return await _verify_store_names(records)
 
 
-async def enrich_menus(records: List[CertRecord]) -> List[CertRecord]:
+async def enrich_menus(records: list[CertRecord]) -> list[CertRecord]:
     """메뉴 보강 단독 실행 (기존 인터페이스 호환)"""
     return await _enrich_menus(records)
 
 
-async def enrich_store_info(records: List[CertRecord]) -> List[CertRecord]:
+async def enrich_store_info(records: list[CertRecord]) -> list[CertRecord]:
     """가게 정보 보강 단독 실행 (기존 인터페이스 호환)"""
     return await _enrich_store_info(records)

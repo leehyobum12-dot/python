@@ -1,45 +1,85 @@
-# ============================================================
-# Supabase 마이그레이션 자동 배포 워크플로우
-# ============================================================
-# 트리거:
-# - main 브랜치 push (sql/migrations/ 변경 시)
-#
-# 주의:
-# - SUPABASE_ACCESS_TOKEN은 GitHub Secrets에 저장 필요
-# ============================================================
-
 name: Deploy SQL Migrations
 
 on:
   push:
     branches: [main]
     paths:
-      - "sql/migrations/**"
+      - "src/sql/migrations/**"
+
+concurrency:
+  group: deploy-migrations
+  cancel-in-progress: false
+
+env:
+  SUPABASE_CLI_VERSION: "1.191.3"  # ✅ 버전 고정 (@latest 제거)
 
 jobs:
   deploy-migrations:
     name: Deploy SQL to Supabase
     runs-on: ubuntu-latest
+    environment: production  # ✅ GitHub Settings에서 사전 생성 필요
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install Supabase CLI
-        run: npm install -g supabase@latest
+        run: npm install -g supabase@$SUPABASE_CLI_VERSION
 
+      - name: Verify CLI version
+        run: supabase --version
+
+      # ✅ 토큰은 환경 변수로 전달 (명령어 인자 노출 회피)
       - name: Login to Supabase
-        run: supabase login --token ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase login --token "$SUPABASE_ACCESS_TOKEN"
 
       - name: Link project
-        run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+        env:
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
 
+      # ✅ 배포 전 검증 (건식 실행)
+      - name: Dry-run migrations
+        run: |
+          echo "🔍 마이그레이션 건식 실행 중..."
+          supabase db push --dry-run || {
+            echo "❌ 건식 실행 실패 - 배포 중단"
+            exit 1
+          }
+
+      # ✅ 실제 배포
       - name: Push migrations
-        run: supabase db push
+        run: |
+          echo "🚀 마이그레이션 배포 시작..."
+          supabase db push
+          echo "✅ 마이그레이션 배포 완료"
 
       - name: Notify success
         if: success()
-        run: echo "✅ SQL 마이그레이션 배포 완료"
+        run: |
+          echo "✅ 배포 완료: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 
-      - name: Notify failure
+      - name: Notify failure (GitHub Issue 자동 생성)
         if: failure()
-        run: echo "❌ SQL 마이그레이션 배포 실패"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 SQL 배포 실패 - ${context.sha.substring(0, 7)}`,
+              body: [
+                '## 실패 정보',
+                `- 커밋: ${context.sha}`,
+                `- **브랜치**: ${context.ref}`,
+                `- **실행 URL**: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+                `- **시간**: ${new Date().toISOString()}`,
+                `- [로그](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+                '',
+                '## 조치 필요',
+                '1. 위 링크에서 실패 로그 확인',
+                '2. 마이그레이션 파일 검토',
+                '3. 필요 시 수동 롤백 수행 (docs/ROLLBACK_GUIDE.md 참고)',
+              ].join('\n'),
+              labels: ['bug', 'deploy-failure']
+            })

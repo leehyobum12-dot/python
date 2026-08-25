@@ -14,16 +14,15 @@
 - PII 필드 명시적 정의
 - JSON 파싱 에러 핸들링 강화
 """
+
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Optional, Tuple
 from urllib.parse import unquote
 
-from .base import BaseAdapter, parse_addr_tokens
 from ..domain.record import CertRecord
 from ..observability.logging import get_logger
-
+from .base import BaseAdapter, parse_addr_tokens
 
 logger = get_logger(__name__)
 
@@ -65,7 +64,7 @@ class LowSodiumAdapter(BaseAdapter):
         """URL 인코딩된 키 처리"""
         return unquote(self.service_key) if '%' in self.service_key else self.service_key
 
-    def _fetch_page(self, page: int, province_prefixes: Tuple[str, ...]):
+    def _fetch_page(self, page: int, province_prefixes: tuple[str, ...]):
         """단일 페이지 수집"""
         if not self.service_key:
             return [], 0, []
@@ -112,8 +111,8 @@ class LowSodiumAdapter(BaseAdapter):
 
             total = body.get('totalCount', 0)
 
-            records: List[CertRecord] = []
-            raw_rows: List[dict] = []
+            records: list[CertRecord] = []
+            raw_rows: list[dict] = []
 
             for item in items:
                 if not isinstance(item, dict):
@@ -131,20 +130,25 @@ class LowSodiumAdapter(BaseAdapter):
                 # 주소 필터링
                 if province_prefixes:
                     matched = False
-                    
+
                     if p and p in province_prefixes:
                         matched = True
-                    
+
                     if not matched:
                         for prefix in province_prefixes:
                             if raw_address.startswith(prefix):
                                 matched = True
                                 break
-                            province_short = prefix.replace('특별시', '').replace('광역시', '').replace('특별자치도', '').replace('특별자치시', '')
+                            province_short = (
+                                prefix.replace('특별시', '')
+                                .replace('광역시', '')
+                                .replace('특별자치도', '')
+                                .replace('특별자치시', '')
+                            )
                             if raw_address.startswith(province_short):
                                 matched = True
                                 break
-                    
+
                     if not matched:
                         continue
 
@@ -174,13 +178,14 @@ class LowSodiumAdapter(BaseAdapter):
             )
             return [], 0, []
 
-    def collect(self, province: Optional[str] = None) -> List[CertRecord]:
+    def collect(self, province: str | None = None) -> list[CertRecord]:
         """데이터 수집"""
         if not self.service_key:
             logger.warning('low_sodium_skip_no_api_key')
             return []
 
         from .base import match_prefixes
+
         prefixes = match_prefixes(province) if province else ()
 
         logger.info('low_sodium_collect_start', province=province, prefixes=prefixes)
@@ -220,10 +225,7 @@ class LowSodiumAdapter(BaseAdapter):
         )
 
         with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
-            futures = {
-                executor.submit(self._fetch_page, p, prefixes): p
-                for p in pages
-            }
+            futures = {executor.submit(self._fetch_page, p, prefixes): p for p in pages}
             for future in as_completed(futures):
                 page = futures[future]
                 try:
@@ -238,7 +240,7 @@ class LowSodiumAdapter(BaseAdapter):
                     )
 
         valid_records = [r for r in all_records if r.is_valid()]
-        
+
         # 제주도 데이터 확인 로깅
         jeju_records = [r for r in valid_records if r.province == '제주특별자치도']
         logger.info(

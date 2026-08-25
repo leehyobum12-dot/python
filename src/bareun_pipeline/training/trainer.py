@@ -19,30 +19,29 @@ NER 모델 학습 (KLUE-RoBERTa)
 - 구조화 로깅
 - 타입 안전성 강화
 """
+
 from __future__ import annotations
 
 import json
 import os
-from typing import List, Dict, Optional
 
 import numpy as np
 from datasets import Dataset, DatasetDict
+from seqeval.metrics import (
+    f1_score,
+    precision_score,
+    recall_score,
+)
 from transformers import (
     AutoModelForTokenClassification,
     AutoTokenizer,
-    TrainingArguments,
-    Trainer,
     DataCollatorForTokenClassification,
     EarlyStoppingCallback,
-)
-from seqeval.metrics import (
-    precision_score,
-    recall_score,
-    f1_score,
+    Trainer,
+    TrainingArguments,
 )
 
 from ..observability.logging import get_logger
-
 
 logger = get_logger(__name__)
 
@@ -118,10 +117,10 @@ def compute_metrics(eval_pred):
     true_predictions = []
     true_labels = []
 
-    for pred, label in zip(predictions, labels):
+    for pred, label in zip(predictions, labels, strict=False):
         pred_seq = []
         label_seq = []
-        for p, l in zip(pred, label):
+        for p, l in zip(pred, label, strict=False):
             if l != -100:
                 pred_seq.append(id2label[p])
                 label_seq.append(id2label[l])
@@ -140,11 +139,11 @@ def compute_metrics(eval_pred):
 
 
 def train_ner_model(
-    train_data: List[Dict],
-    val_data: List[Dict],
-    test_data: List[Dict],
+    train_data: list[dict],
+    val_data: list[dict],
+    test_data: list[dict],
     model_save_path: str,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     NER 모델 학습
 
@@ -184,11 +183,13 @@ def train_ner_model(
     )
 
     # Step 2: 데이터셋 준비 및 토큰화
-    datasets = DatasetDict({
-        'train': Dataset.from_list(train_data),
-        'val': Dataset.from_list(val_data),
-        'test': Dataset.from_list(test_data),
-    })
+    datasets = DatasetDict(
+        {
+            'train': Dataset.from_list(train_data),
+            'val': Dataset.from_list(val_data),
+            'test': Dataset.from_list(test_data),
+        }
+    )
 
     max_length = TRAINING_CONFIG['max_seq_length']
     tokenized_datasets = datasets.map(

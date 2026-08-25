@@ -13,12 +13,12 @@ dedup_key 생성 모듈 (salted SHA-256)
 - 기존: 전화번호 평문을 dedup_key에 포함
 - 개선: 전화번호를 salted SHA-256으로 해시화
 """
+
 from __future__ import annotations
 
 import hashlib
 import os
 import re
-from typing import Optional
 
 
 def _get_salt() -> str:
@@ -84,8 +84,8 @@ def hash_phone(phone: str) -> str:
 def generate_dedup_key(
     raw_name: str,
     raw_address: str,
-    phone: Optional[str] = None,
-    detail_address: Optional[str] = None,
+    phone: str | None = None,
+    detail_address: str | None = None,
 ) -> str:
     """
     중복 제거 키 생성

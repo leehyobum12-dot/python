@@ -19,22 +19,23 @@
 - 스레드 안전성 (threading.Lock)
 - 구조화 로깅
 """
+
 from __future__ import annotations
 
 import json
 import os
 import threading
 from datetime import date
-from typing import Dict, Optional, TypedDict, Any
+from typing import Any, TypedDict
 
 from .logging import get_logger
-
 
 logger = get_logger(__name__)
 
 
 class QuotaState(TypedDict):
     """쿼터 상태 구조"""
+
     date: str
     naver_geo: int
     naver_blog: int
@@ -45,6 +46,7 @@ class QuotaState(TypedDict):
 
 class QuotaExceededError(Exception):
     """쿼터 초과 예외"""
+
     pass
 
 
@@ -57,32 +59,36 @@ class QuotaManager:
         qm.check_and_consume('naver_geo')
     """
 
-    _instance: Optional['QuotaManager'] = None
+    _instance: QuotaManager | None = None
     _lock = threading.Lock()
 
     # 일일 한도 (SSOT)
-    DAILY_LIMITS: Dict[str, int] = {
+    DAILY_LIMITS: dict[str, int] = {
         'naver_geo': 2_000,
         'naver_blog': 8_000,
         'naver_cafe': 5_000,
         'naver_news': 3_000,
         'kakao_local': 20_000,
+        'tourist_info': 1_000,
     }
 
-    def __init__(self, quota_path: Optional[str] = None):
+    WARNING_THRESHOLD = 0.9
+
+    def __init__(self, quota_path: str | None = None):
         if quota_path is None:
             from ..settings import get_settings
+
             settings = get_settings()
             quota_path = os.path.join(settings.cache_dir, 'quota.json')
 
         self._path = quota_path
-        self._state: Dict[str, int] = {}
+        self._state: dict[str, int] = {}
         self._date: str = ''
         self._state_lock = threading.Lock()
         self._load()
 
     @classmethod
-    def get_instance(cls, quota_path: Optional[str] = None) -> 'QuotaManager':
+    def get_instance(cls, quota_path: str | None = None) -> QuotaManager:
         """싱글톤 인스턴스 반환"""
         if cls._instance is None:
             with cls._lock:
@@ -100,8 +106,7 @@ class QuotaManager:
                     data = json.load(f)
                 if data.get('date') == today:
                     self._state = {
-                        k: int(v) for k, v in data.items()
-                        if k != 'date' and k in self.DAILY_LIMITS
+                        k: int(v) for k, v in data.items() if k != 'date' and k in self.DAILY_LIMITS
                     }
                     self._date = today
                     logger.info(
@@ -110,13 +115,13 @@ class QuotaManager:
                         state=self._state,
                     )
                     return
-            except (json.JSONDecodeError, IOError, ValueError) as e:
+            except (OSError, json.JSONDecodeError, ValueError) as e:
                 logger.warning(
                     'quota_load_failed',
                     error=str(e),
                 )
 
-        self._state = {k: 0 for k in self.DAILY_LIMITS}
+        self._state = dict.fromkeys(self.DAILY_LIMITS, 0)
         self._date = today
 
     def _save(self) -> None:
@@ -124,18 +129,19 @@ class QuotaManager:
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
 
         with self._state_lock:
-            data: Dict[str, Any] = dict(self._state)
+            data: dict[str, Any] = dict(self._state)
             data['date'] = self._date
 
         with open(self._path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-    def check_and_consume(self, provider: str) -> None:
+    def check_and_consume(self, provider: str, count: int = 1) -> None:
         """
-        쿼터 확인 및 소진
+        쿼터 확인 및 소진 (배치 카운팅 지원)
 
         Args:
             provider: API 제공자 이름
+            count: 한번에 소진할 쿼터 수 (기본: 1)
 
         Raises:
             QuotaExceededError: 일일 한도 초과 시
@@ -146,11 +152,21 @@ class QuotaManager:
 
         with self._state_lock:
             used = self._state.get(provider, 0)
-            if used >= limit:
-                raise QuotaExceededError(
-                    f'{provider} 쿼터 소진 ({used}/{limit})'
+
+            if used + count > limit:
+                raise QuotaExceededError(f'{provider} 쿼터 소진 ({used}/{limit}, 요청: {count})')
+
+            self._state[provider] = used + count
+
+            # 🆕 경고 임계값 체크
+            if used / limit >= self.WARNING_THRESHOLD:
+                logger.warning(
+                    'quota_warning_threshold',
+                    provider=provider,
+                    used=used + count,
+                    limit=limit,
+                    remaining=limit - (used + count),
                 )
-            self._state[provider] = used + 1
 
             # 200회마다 저장 (I/O 최적화)
             if self._state[provider] % 200 == 0:
@@ -183,5 +199,5 @@ class QuotaManager:
     def reset(self) -> None:
         """쿼터 초기화 (테스트용)"""
         with self._state_lock:
-            self._state = {k: 0 for k in self.DAILY_LIMITS}
+            self._state = dict.fromkeys(self.DAILY_LIMITS, 0)
         self._save()

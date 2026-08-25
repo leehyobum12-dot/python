@@ -16,10 +16,11 @@ NLP 패키지
     하위 모듈 경로는 리팩터링 시 변경될 수 있습니다.
     패키지 레벨 import를 사용하면 리팩터링에 영향을 받지 않습니다.
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
 import importlib
+from typing import TYPE_CHECKING, Any
 
 # Pylance/Pyright 타입 검사용 (런타임에는 실행되지 않음)
 if TYPE_CHECKING:
@@ -61,9 +62,9 @@ def __dir__() -> list[str]:
 
 # 정적 분석기(Pylance)가 인식할 수 있도록 리터럴 리스트로 명시
 __all__ = [
-    'MenuNERPredictor',
-    'NERPostprocessor',
-    'NERMenuPipeline',
-    'LLMVerifier',
     'HybridMenuExtractor',
+    'LLMVerifier',
+    'MenuNERPredictor',
+    'NERMenuPipeline',
+    'NERPostprocessor',
 ]

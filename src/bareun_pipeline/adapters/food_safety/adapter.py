@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
 
 from ...domain.record import CertRecord
 from ...observability.logging import get_logger
@@ -19,7 +18,7 @@ logger = get_logger(__name__)
 class FoodSafetyAdapter(BaseAdapter):
     """
     식품안심업소(위생등급) 어댑터
-    
+
     멀티 벤더 페일오버 전략:
     1순위: data.go.kr 미러
     2순위: 식약처 원본 (MFDS)
@@ -33,6 +32,8 @@ class FoodSafetyAdapter(BaseAdapter):
     # PII 필드 정의 (Bronze 아카이빙 시 자동 마스킹 대상)
     pii_fields = {'PRSDNT_NM', 'WRKR_REG_NO'}
 
+    MAX_CONSECUTIVE_FAILURES = 5
+
     def __init__(self, snapshot_first: bool = False):
         super().__init__()
         self.client = FoodSafetyClient(
@@ -41,7 +42,7 @@ class FoodSafetyAdapter(BaseAdapter):
         )
         self.snapshot_first = snapshot_first
 
-    def collect(self, province: Optional[str] = None) -> list[CertRecord]:
+    def collect(self, province: str | None = None) -> list[CertRecord]:
         """데이터 수집 (BaseAdapter 시그니처 준수)"""
         if not self.settings.foodsafety_korea_key and not self.settings.data_go_kr_key:
             logger.warning('food_safety_skip_no_api_key')
@@ -85,21 +86,21 @@ class FoodSafetyAdapter(BaseAdapter):
                         # 성공 시 다른 벤더 작업 취소 및 결과 반환
                         self.raw_rows = rows
                         records = map_to_cert_records(rows, province, self.source, self.cert_type)
-                        
+
                         logger.info(
                             'food_safety_vendor_success',
                             vendor=vendor_kind,
                             count=len(records),
                             raw_count=len(rows),
                         )
-                        
+
                         # 나머지 벤더 취소
                         for f in futures:
                             if not f.done():
                                 f.cancel()
-                                
+
                         return records
-                        
+
                 except Exception as e:
                     logger.error(
                         'food_safety_vendor_failed',
@@ -118,7 +119,7 @@ class FoodSafetyAdapter(BaseAdapter):
         logger.error('food_safety_all_failed')
         return []
 
-    def _execute_vendor(self, kind: str, url: Optional[str], province: Optional[str]) -> list[dict]:
+    def _execute_vendor(self, kind: str, url: str | None, province: str | None) -> list[dict]:
         """벤더별 수집 실행"""
         if kind == 'datago' and url:
             return self.client.fetch_datago(url)
@@ -126,10 +127,11 @@ class FoodSafetyAdapter(BaseAdapter):
             return self.client.fetch_mfds()
         return []
 
-    def _replay_from_raw(self, province: Optional[str]) -> list[CertRecord]:
+    def _replay_from_raw(self, province: str | None) -> list[CertRecord]:
         """로컬 원본 파일(Bronze)에서 리플레이"""
         try:
             from ...bronze.raw_archiver import RawArchiver
+
             archiver = RawArchiver()
             rows = archiver.load_latest(self.source, province or 'nationwide')
             if not rows:

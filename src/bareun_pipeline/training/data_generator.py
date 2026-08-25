@@ -18,15 +18,14 @@
 - 구조화 로깅
 - 타입 안전성 강화
 """
+
 from __future__ import annotations
 
 import json
 import os
 import random
-from typing import List, Dict, Tuple, Optional
 
 from ..observability.logging import get_logger
-
 
 logger = get_logger(__name__)
 
@@ -87,30 +86,97 @@ NEGATIVE_TEMPLATES = [
 # 가게 이름 생성기
 # ═══════════════════════════════════════════════════════════
 STORE_LOCATIONS = [
-    '제주', '서울', '부산', '전주', '강릉', '속초', '여수', '통영',
-    '대구', '광주', '인천', '수원', '성남', '청주', '천안', '목포',
-    '춘천', '경주', '안동', '공주', '해남', '보성', '담양', '순천',
+    '제주',
+    '서울',
+    '부산',
+    '전주',
+    '강릉',
+    '속초',
+    '여수',
+    '통영',
+    '대구',
+    '광주',
+    '인천',
+    '수원',
+    '성남',
+    '청주',
+    '천안',
+    '목포',
+    '춘천',
+    '경주',
+    '안동',
+    '공주',
+    '해남',
+    '보성',
+    '담양',
+    '순천',
 ]
 
 STORE_SUFFIXES = [
-    '식당', '전문점', '집', '맛집', '회관', '밥집', '국밥집',
-    '식당', '전문점', '집',  # 가중치
+    '식당',
+    '전문점',
+    '집',
+    '맛집',
+    '회관',
+    '밥집',
+    '국밥집',
+    '식당',
+    '전문점',
+    '집',  # 가중치
 ]
 
 FOOD_KEYWORDS = [
-    '흑돼지', '해장국', '국수', '비빔밥', '초밥', '갈비', '불고기',
-    '찌개', '구이', '탕', '전골', '회', '칼국수', '냉면',
-    '떡볶이', '치킨', '삼겹살', '족발', '보쌈', '순대',
+    '흑돼지',
+    '해장국',
+    '국수',
+    '비빔밥',
+    '초밥',
+    '갈비',
+    '불고기',
+    '찌개',
+    '구이',
+    '탕',
+    '전골',
+    '회',
+    '칼국수',
+    '냉면',
+    '떡볶이',
+    '치킨',
+    '삼겹살',
+    '족발',
+    '보쌈',
+    '순대',
 ]
 
 REAL_STORE_NAMES = [
-    '올래국수', '우진해장국', '자매국수', '삼대국수회관',
-    '돈사돈', '흑돈가', '셰프와흑돼지', '할매국밥',
-    '하동관', '신선설농탕', '모슬포항식당', '진짜원조초밥',
-    '전주비빔밥명가', '강릉초당두부', '여수한정식', '통영충무김밥',
-    '부산돼지국밥', '대구막창', '광주상추튀김', '제주흑돼지전문점',
-    '명동교자', '을지로국밥', '남포면옥', '평양냉면집',
-    '진주회관', '하림각', '양평해장국', '이화수전통육개장',
+    '올래국수',
+    '우진해장국',
+    '자매국수',
+    '삼대국수회관',
+    '돈사돈',
+    '흑돈가',
+    '셰프와흑돼지',
+    '할매국밥',
+    '하동관',
+    '신선설농탕',
+    '모슬포항식당',
+    '진짜원조초밥',
+    '전주비빔밥명가',
+    '강릉초당두부',
+    '여수한정식',
+    '통영충무김밥',
+    '부산돼지국밥',
+    '대구막창',
+    '광주상추튀김',
+    '제주흑돼지전문점',
+    '명동교자',
+    '을지로국밥',
+    '남포면옥',
+    '평양냉면집',
+    '진주회관',
+    '하림각',
+    '양평해장국',
+    '이화수전통육개장',
 ]
 
 
@@ -132,10 +198,8 @@ def generate_store_name() -> str:
 
 
 def tokenize_with_labels(
-    pattern: str,
-    store: str,
-    menu: Optional[str] = None
-) -> Tuple[List[str], List[str]]:
+    pattern: str, store: str, menu: str | None = None
+) -> tuple[list[str], list[str]]:
     """
     템플릿 패턴을 토큰과 BIO 라벨로 변환
 
@@ -149,11 +213,12 @@ def tokenize_with_labels(
     Returns:
         (토큰 목록, 라벨 목록)
     """
-    tokens: List[str] = []
-    labels: List[str] = []
+    tokens: list[str] = []
+    labels: list[str] = []
 
     # 플레이스홀더로 분할
     import re
+
     parts = re.split(r'(\{store\}|\{menu\})', pattern)
 
     for part in parts:
@@ -186,9 +251,9 @@ def tokenize_with_labels(
 
 def generate_dataset(
     target_samples: int,
-    food_names: List[str],
+    food_names: list[str],
     positive_ratio: float = 0.8,
-) -> List[Dict]:
+) -> list[dict]:
     """
     합성 NER 데이터셋 생성
 
@@ -202,7 +267,7 @@ def generate_dataset(
     Returns:
         생성된 데이터셋
     """
-    dataset: List[Dict] = []
+    dataset: list[dict] = []
 
     # 긍정 샘플 (메뉴 포함)
     positive_count = int(target_samples * positive_ratio)
@@ -231,10 +296,10 @@ def generate_dataset(
 
 
 def split_dataset(
-    dataset: List[Dict],
+    dataset: list[dict],
     train_ratio: float = 0.8,
     val_ratio: float = 0.1,
-) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+) -> tuple[list[dict], list[dict], list[dict]]:
     """
     데이터셋 분할 (train/val/test)
 
@@ -259,9 +324,9 @@ def split_dataset(
 
 
 def save_dataset(
-    train: List[Dict],
-    val: List[Dict],
-    test: List[Dict],
+    train: list[dict],
+    val: list[dict],
+    test: list[dict],
     data_dir: str,
 ) -> None:
     """

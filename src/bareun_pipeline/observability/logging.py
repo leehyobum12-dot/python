@@ -10,11 +10,10 @@
 - 컨텍스트 바인딩으로 자동 주입
 - JSON 포맷으로 기계 판독 가능
 """
+
 from __future__ import annotations
 
 import logging
-import sys
-from typing import Optional
 
 import structlog
 
@@ -57,7 +56,7 @@ def setup_logging(
     return structlog.get_logger()
 
 
-def get_logger(name: Optional[str] = None) -> structlog.BoundLogger:
+def get_logger(name: str | None = None) -> structlog.BoundLogger:
     """
     로거 인스턴스 반환
 

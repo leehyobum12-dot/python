@@ -19,21 +19,22 @@
 - 타입 안전성 강화
 - 구조화 로깅
 """
+
 from __future__ import annotations
 
 import json
 import os
 from datetime import datetime
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 from ..observability.logging import get_logger
-
 
 logger = get_logger(__name__)
 
 
 class CheckpointData(TypedDict):
     """체크포인트 데이터 구조"""
+
     province: str
     completed_at: str
     record_count: int
@@ -136,7 +137,7 @@ class CheckpointManager:
             record_count=record_count,
         )
 
-    def get_record_count(self, province: str) -> Optional[int]:
+    def get_record_count(self, province: str) -> int | None:
         """저장된 레코드 수 반환"""
         path = self._path(province)
         if not os.path.exists(path):

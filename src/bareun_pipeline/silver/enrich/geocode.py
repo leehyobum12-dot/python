@@ -9,6 +9,7 @@ Bareun Pipeline: Silver Enrichment - Geocoding & Coordinate Anomaly
   - enrich_coordinates 진입점 함수에 `force` 매개변수 추가 및 하위 서비스로 위임
   - Pyright/Pylance "No parameter named 'force'" 에러 해결
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,12 +17,11 @@ import json
 import os
 import threading
 from math import asin, cos, radians, sin, sqrt
-from typing import Optional
 
 import httpx
 
-from ...domain.record import CertRecord
 from ...adapters.geocode_client import GeocodeAdapter, GeocodeResult
+from ...domain.record import CertRecord
 from ...observability.logging import get_logger
 from ...settings import get_settings
 
@@ -33,40 +33,66 @@ logger = get_logger(__name__)
 # ═══════════════════════════════════════════════════════════
 
 PROVINCE_CENTERS: dict[str, tuple[float, float]] = {
-    '서울특별시': (37.5665, 126.9780), '부산광역시': (35.1796, 129.0756),
-    '대구광역시': (35.8714, 128.6014), '인천광역시': (37.4563, 126.7052),
-    '광주광역시': (35.1595, 126.8526), '대전광역시': (36.3504, 127.3845),
-    '울산광역시': (35.5384, 129.3114), '세종특별자치시': (36.4800, 127.2890),
-    '경기도': (37.4138, 127.5171), '강원특별자치도': (37.8228, 128.1555),
-    '충청북도': (36.8001, 127.7200), '충청남도': (36.5184, 126.8000),
-    '전북특별자치도': (35.7175, 127.1530), '전라남도': (35.1595, 126.8526),
-    '경상북도': (36.4919, 128.8889), '경상남도': (35.4606, 128.2132),
+    '서울특별시': (37.5665, 126.9780),
+    '부산광역시': (35.1796, 129.0756),
+    '대구광역시': (35.8714, 128.6014),
+    '인천광역시': (37.4563, 126.7052),
+    '광주광역시': (35.1595, 126.8526),
+    '대전광역시': (36.3504, 127.3845),
+    '울산광역시': (35.5384, 129.3114),
+    '세종특별자치시': (36.4800, 127.2890),
+    '경기도': (37.4138, 127.5171),
+    '강원특별자치도': (37.8228, 128.1555),
+    '충청북도': (36.8001, 127.7200),
+    '충청남도': (36.5184, 126.8000),
+    '전북특별자치도': (35.7175, 127.1530),
+    '전라남도': (35.1595, 126.8526),
+    '경상북도': (36.4919, 128.8889),
+    '경상남도': (35.4606, 128.2132),
     '제주특별자치도': (33.4996, 126.5312),
 }
 
 PROVINCE_RADIUS_M: dict[str, int] = {
-    '서울특별시': 20_000, '세종특별자치시': 20_000,
-    '부산광역시': 40_000, '대구광역시': 40_000,
-    '인천광역시': 50_000, '광주광역시': 30_000,
-    '대전광역시': 30_000, '울산광역시': 40_000,
-    '경기도': 80_000, '강원특별자치도': 150_000,
-    '충청북도': 80_000, '충청남도': 80_000,
-    '전북특별자치도': 80_000, '전라남도': 120_000,
-    '경상북도': 150_000, '경상남도': 120_000,
+    '서울특별시': 20_000,
+    '세종특별자치시': 20_000,
+    '부산광역시': 40_000,
+    '대구광역시': 40_000,
+    '인천광역시': 50_000,
+    '광주광역시': 30_000,
+    '대전광역시': 30_000,
+    '울산광역시': 40_000,
+    '경기도': 80_000,
+    '강원특별자치도': 150_000,
+    '충청북도': 80_000,
+    '충청남도': 80_000,
+    '전북특별자치도': 80_000,
+    '전라남도': 120_000,
+    '경상북도': 150_000,
+    '경상남도': 120_000,
     '제주특별자치도': 80_000,
 }
 
 MUNICIPALITY_EXCEPTIONS: dict[tuple[str, str], int] = {
-    ('대구광역시', '군위군'): 60_000, ('경기도', '파주시'): 100_000,
-    ('경기도', '연천군'): 120_000, ('인천광역시', '강화군'): 80_000,
-    ('인천광역시', '옹진군'): 200_000, ('경상북도', '울릉군'): 250_000,
-    ('경상북도', '울진군'): 180_000, ('경상남도', '거제시'): 140_000,
-    ('경상남도', '남해군'): 140_000, ('경상남도', '통영시'): 140_000,
-    ('전라남도', '신안군'): 160_000, ('전라남도', '진도군'): 160_000,
-    ('전라남도', '완도군'): 160_000, ('강원특별자치도', '고성군'): 180_000,
-    ('강원특별자치도', '인제군'): 160_000, ('경기도', '가평군'): 100_000,
-    ('경기도', '양평군'): 90_000, ('경상북도', '봉화군'): 180_000,
-    ('경상북도', '영덕군'): 170_000, ('전라남도', '여수시'): 150_000,
+    ('대구광역시', '군위군'): 60_000,
+    ('경기도', '파주시'): 100_000,
+    ('경기도', '연천군'): 120_000,
+    ('인천광역시', '강화군'): 80_000,
+    ('인천광역시', '옹진군'): 200_000,
+    ('경상북도', '울릉군'): 250_000,
+    ('경상북도', '울진군'): 180_000,
+    ('경상남도', '거제시'): 140_000,
+    ('경상남도', '남해군'): 140_000,
+    ('경상남도', '통영시'): 140_000,
+    ('전라남도', '신안군'): 160_000,
+    ('전라남도', '진도군'): 160_000,
+    ('전라남도', '완도군'): 160_000,
+    ('강원특별자치도', '고성군'): 180_000,
+    ('강원특별자치도', '인제군'): 160_000,
+    ('경기도', '가평군'): 100_000,
+    ('경기도', '양평군'): 90_000,
+    ('경상북도', '봉화군'): 180_000,
+    ('경상북도', '영덕군'): 170_000,
+    ('전라남도', '여수시'): 150_000,
     ('전라남도', '고흥군'): 150_000,
 }
 
@@ -74,6 +100,7 @@ MUNICIPALITY_EXCEPTIONS: dict[tuple[str, str], int] = {
 # ═══════════════════════════════════════════════════════════
 # 좌표 유틸리티
 # ═══════════════════════════════════════════════════════════
+
 
 def haversine(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     """두 좌표 사이 거리 (미터)"""
@@ -109,7 +136,8 @@ def detect_coordinate_anomalies(
                 if anomalies <= 10:
                     logger.warning(
                         'coordinate_anomaly_province_center',
-                        name=record.raw_name, province=record.province,
+                        name=record.raw_name,
+                        province=record.province,
                         distance_km=round(dist / 1000, 1),
                         max_km=max_radius // 1000,
                     )
@@ -132,7 +160,8 @@ def detect_coordinate_anomalies(
                             logger.warning(
                                 'coordinate_cross_validation_warning',
                                 name=record.raw_name,
-                                source=src_key[0], distance_m=round(dist, 1),
+                                source=src_key[0],
+                                distance_m=round(dist, 1),
                             )
 
     if anomalies > 0:
@@ -147,12 +176,13 @@ def detect_coordinate_anomalies(
 # 지오코딩 캐시
 # ═══════════════════════════════════════════════════════════
 
+
 class GeocodeCache:
     """지오코딩 캐시 (파일 기반)"""
 
     def __init__(self, cache_path: str):
         self._path = cache_path
-        self._cache: dict[str, Optional[dict]] = {}
+        self._cache: dict[str, dict | None] = {}
         self._lock = threading.Lock()
         self._load()
 
@@ -178,11 +208,11 @@ class GeocodeCache:
         except Exception as e:
             logger.warning('geocode_cache_save_failed', path=self._path, error=str(e))
 
-    def get(self, address: str) -> Optional[dict]:
+    def get(self, address: str) -> dict | None:
         with self._lock:
             return self._cache.get(address)
 
-    def set(self, address: str, result: Optional[dict]) -> None:
+    def set(self, address: str, result: dict | None) -> None:
         with self._lock:
             self._cache[address] = result
 
@@ -190,6 +220,7 @@ class GeocodeCache:
 # ═══════════════════════════════════════════════════════════
 # 지오코딩 서비스 (어댑터 오케스트레이션)
 # ═══════════════════════════════════════════════════════════
+
 
 class GeocodeService:
     """네이버 지오코딩 어댑터 기반 좌표 보강 서비스"""
@@ -208,10 +239,7 @@ class GeocodeService:
         force: bool = False,
     ) -> list[CertRecord]:
         """배치 지오코딩 (캐시 우선 + 어댑터 위임)"""
-        targets = [
-            r for r in records
-            if force or not r.has_coordinate()
-        ]
+        targets = [r for r in records if force or not r.has_coordinate()]
         targets = [r for r in targets if r.raw_address and r.raw_address.strip()]
 
         if not targets:
@@ -241,8 +269,8 @@ class GeocodeService:
                     return
 
                 async with sem:
-                    result: Optional[GeocodeResult] = await self.adapter.geocode(address, client)
-                    
+                    result: GeocodeResult | None = await self.adapter.geocode(address, client)
+
                     if result:
                         api_calls += 1
                         hit_dict = {
@@ -261,13 +289,15 @@ class GeocodeService:
 
             chunk_size = 200
             for i in range(0, len(targets), chunk_size):
-                chunk = targets[i:i + chunk_size]
+                chunk = targets[i : i + chunk_size]
                 await asyncio.gather(*[geocode_one(r) for r in chunk])
                 self.cache.save()
                 logger.info(
                     'geocode_progress',
                     processed=min(i + chunk_size, len(targets)),
-                    total=len(targets), api_calls=api_calls, cache_hits=cache_hits,
+                    total=len(targets),
+                    api_calls=api_calls,
+                    cache_hits=cache_hits,
                 )
 
         self.cache.save()
@@ -299,13 +329,14 @@ class GeocodeService:
 # 진입점 (Autofix 적용)
 # ═══════════════════════════════════════════════════════════
 
+
 async def enrich_coordinates(
-    records: list[CertRecord], 
+    records: list[CertRecord],
     force: bool = False,
 ) -> list[CertRecord]:
     """
     지오코딩 + 좌표 이상치 탐지 진입점
-    
+
     Args:
         records: 대상 레코드 목록
         force: True면 기존 좌표/캐시를 무시하고 강제 지오코딩 수행

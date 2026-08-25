@@ -20,24 +20,24 @@ NLP: 로컬 LLM 검증기 (Ollama)
 - 구조화 로깅
 - 타입 안전성 강화
 """
+
 from __future__ import annotations
 
 import json
-import re
-from typing import List, Optional, TypedDict
+from typing import TypedDict
 
 import httpx
 
-from ...settings import get_settings
 from ...observability.logging import get_logger
-
+from ...settings import get_settings
 
 logger = get_logger(__name__)
 
 
 class LLMExtractResult(TypedDict):
     """LLM 추출 결과"""
-    menus: List[str]
+
+    menus: list[str]
     confidence: float
     method: str
 
@@ -116,15 +116,12 @@ class LLMVerifier:
             response = httpx.get(self.settings.ollama_tags_url, timeout=3.0)
             if response.status_code == 200:
                 models = [m['name'] for m in response.json().get('models', [])]
-                return any(
-                    self.settings.ollama_model.split(':')[0] in m
-                    for m in models
-                )
+                return any(self.settings.ollama_model.split(':')[0] in m for m in models)
         except Exception:
             pass
         return False
 
-    async def _call_ollama(self, prompt: str) -> Optional[List[str]]:
+    async def _call_ollama(self, prompt: str) -> list[str] | None:
         """
         Ollama API 호출 + JSON 강제 포맷
 
@@ -151,7 +148,7 @@ class LLMVerifier:
                             'top_p': 0.1,
                             'num_predict': 256,
                         },
-                    }
+                    },
                 )
 
             if response.status_code != 200:
@@ -169,8 +166,11 @@ class LLMVerifier:
                 menus = parsed.get('menus', parsed.get('final_menus', []))
                 if isinstance(menus, list):
                     menus = [
-                        m.strip() for m in menus
-                        if m and isinstance(m, str) and m.strip()
+                        m.strip()
+                        for m in menus
+                        if m
+                        and isinstance(m, str)
+                        and m.strip()
                         and m.strip() not in {'없음', 'None', 'null', ''}
                         and 2 <= len(m.strip()) <= 15
                     ]
@@ -212,12 +212,8 @@ class LLMVerifier:
         return f'[업종 힌트] {biz_key} 음식점의 대표 메뉴: {self.BIZ_MENU_GUIDE[biz_key]}'
 
     async def verify_menu_with_context(
-        self,
-        text: str,
-        store_name: str,
-        ner_menus: List[str],
-        biz_type: str = ''
-    ) -> Optional[List[str]]:
+        self, text: str, store_name: str, ner_menus: list[str], biz_type: str = ''
+    ) -> list[str] | None:
         """
         [검증 모드] NER 추출 결과를 LLM으로 교차 검증 (L1+L3 적용)
 
@@ -254,11 +250,8 @@ JSON 형식으로만 응답하세요. 예: {{"menus": ["김치찌개", "된장�
         return await self._call_ollama(prompt)
 
     async def extract_menu_direct(
-        self,
-        text: str,
-        store_name: str,
-        biz_type: str = ''
-    ) -> Optional[List[str]]:
+        self, text: str, store_name: str, biz_type: str = ''
+    ) -> list[str] | None:
         """
         [보충 모드] NER가 놓친 메뉴를 LLM으로 직접 추출 (L1+L3 적용)
 

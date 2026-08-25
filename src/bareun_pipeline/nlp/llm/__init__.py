@@ -9,10 +9,11 @@ Large Language Model 검증기 모듈입니다.
 주의: 이 패키지의 모듈은 httpx를 사용합니다.
 실제로 사용할 때만 import되도록 lazy loading을 적용합니다.
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
 import importlib
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .verifier import LLMVerifier

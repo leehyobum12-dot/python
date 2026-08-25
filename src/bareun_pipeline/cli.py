@@ -12,16 +12,15 @@ CLI 엔트리포인트 (Click 기반)
     bareun-pipeline bronze-collect  # 전국 수집
     bareun-pipeline quota-status
 """
+
 from __future__ import annotations
 
-import sys
 import logging
-from typing import Optional
 
 import click
 
+from .observability.logging import get_logger, setup_logging
 from .settings import get_settings
-from .observability.logging import setup_logging, get_logger
 
 
 @click.group()
@@ -45,7 +44,7 @@ def cli(ctx: click.Context, log_level: str, log_json: bool) -> None:
 @click.option('--province', '-p', default=None, help='시도명 (없으면 전국)')
 @click.option('--force', '-f', is_flag=True, help='체크포인트 무시하고 강제 수집')
 @click.pass_context
-def bronze_collect(ctx: click.Context, province: Optional[str], force: bool) -> None:
+def bronze_collect(ctx: click.Context, province: str | None, force: bool) -> None:
     """Bronze Layer: 공공데이터 수집"""
     from .bronze.collect import BronzeCollector
 
@@ -70,7 +69,7 @@ def bronze_collect(ctx: click.Context, province: Optional[str], force: bool) -> 
 @cli.command()
 @click.option('--province', '-p', default=None, help='시도명 (없으면 전국)')
 @click.pass_context
-def silver_process(ctx: click.Context, province: Optional[str]) -> None:
+def silver_process(ctx: click.Context, province: str | None) -> None:
     """Silver Layer: 데이터 정제 (Phase 3에서 구현)"""
     click.echo('Silver Layer는 Phase 3에서 구현됩니다.')
 
@@ -78,7 +77,7 @@ def silver_process(ctx: click.Context, province: Optional[str]) -> None:
 @cli.command()
 @click.option('--province', '-p', default=None, help='시도명 (없으면 전국)')
 @click.pass_context
-def gold_export(ctx: click.Context, province: Optional[str]) -> None:
+def gold_export(ctx: click.Context, province: str | None) -> None:
     """Gold Layer: Supabase 적재 (Phase 4에서 구현)"""
     click.echo('Gold Layer는 Phase 4에서 구현됩니다.')
 

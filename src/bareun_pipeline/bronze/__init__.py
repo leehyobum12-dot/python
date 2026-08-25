@@ -10,14 +10,15 @@ Bronze Layer 패키지
 Lazy 노출 (무거운 모듈):
 - collect: 수집 orchestration (ThreadPoolExecutor, QuotaManager 등 무거운 의존성)
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
 import importlib
+from typing import TYPE_CHECKING, Any
 
 # 가벼운 모듈은 즉시 노출
 from .raw_archiver import RawArchiver
-from .tourist_checkpoint import TouristCheckpoint
+from .tourist_content_tracker import TouristCheckpoint
 
 if TYPE_CHECKING:
     from .collect import BronzeCollector
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     'BronzeCollector': ('bareun_pipeline.bronze.collect', 'BronzeCollector'),
 }
+
 
 def __getattr__(name: str) -> Any:
     """PEP 562 기반 모듈 레벨 Lazy Import"""
@@ -34,13 +36,15 @@ def __getattr__(name: str) -> Any:
         attr = getattr(module, attr_name)
         globals()[name] = attr  # 캐싱하여 재호출 시 즉시 반환
         return attr
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+
 
 def __dir__() -> list[str]:
     return ['RawArchiver', 'TouristCheckpoint'] + list(_LAZY_IMPORTS.keys())
 
+
 __all__ = [
+    'BronzeCollector',
     'RawArchiver',
     'TouristCheckpoint',
-    'BronzeCollector',
 ]

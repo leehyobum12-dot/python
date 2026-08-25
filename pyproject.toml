@@ -119,16 +119,27 @@ select = [
     "SIM",  # flake8-simplify
     "TCH",  # flake8-type-checking
     "RUF",  # Ruff-specific rules
+    "PL", "PERF",
 ]
 ignore = [
-    "S101",   # assert 사용 허용 (테스트에서 필요)
-    "S311",   # random 모듈 사용 허용 (비보안 용도)
-    "S303",   # hashlib 사용 허용 (dedup 해시용)
+    "S101",    # assert 사용 허용 (테스트)
+    "S311",    # random 허용 (비보안)
+    "S303",    # hashlib 허용 (dedup 해시)
+    "PLR0913", # 인자 개수 제한 완화 (어댑터 패턴 특성)
+    "PLR0912", # 분기 개수 제한 완화 (매핑 로직)
+    "PERF401", # 리스트 내포 vs append (가독성 우선)
 ]
 
+# 줄 길이는 포매터에 위임하되, 100자 초과만 경고
+[tool.ruff.lint.pycodestyle]
+max-line-length = 100
+
+# 특정 파일별 완화 (레거시 NLP 모듈)
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S106"]
-"scripts/**" = ["S101"]
+"src/bareun_pipeline/preprocessing/*" = ["E501", "C901"]
+"src/bareun_pipeline/training/*" = ["E501"]
+"src/bareun_pipeline/nlp/*" = ["E501"]
+"tests/**" = ["S101", "S106", "PLR2004"]
 
 [tool.ruff.format]
 quote-style = "single"

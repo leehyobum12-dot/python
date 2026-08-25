@@ -8,6 +8,7 @@ Bareun Pipeline: Silver Enrichment - Menu Enrichment
 
 이관 출처: silver/enrich.py (MenuEnricher + is_valid_menu_name)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,12 +17,12 @@ import os
 import re
 import threading
 from difflib import SequenceMatcher
-from typing import Optional
 
 import httpx
 
-from ...domain.record import CertRecord
 from ...adapters.local_search_client import LocalSearchAdapter
+from ...domain.menu import deduplicate_menus, is_valid_menu_name
+from ...domain.record import CertRecord
 from ...observability.logging import get_logger
 from ...settings import get_settings
 
@@ -33,16 +34,24 @@ logger = get_logger(__name__)
 # ═══════════════════════════════════════════════════════════
 
 INVALID_MENU_PATTERNS: list[str] = [
-    r'^[0-9,]+원$', r'^\d+인분$', r'^[가-힣]{1}$',
-    r'^세트$', r'^식사$', r'^음료$',
-    r'^메뉴$', r'^요리$', r'^코스$',
-    r'^기본$', r'^추가$', r'^(서비스|무료|제공)$',
+    r'^[0-9,]+원$',
+    r'^\d+인분$',
+    r'^[가-힣]{1}$',
+    r'^세트$',
+    r'^식사$',
+    r'^음료$',
+    r'^메뉴$',
+    r'^요리$',
+    r'^코스$',
+    r'^기본$',
+    r'^추가$',
+    r'^(서비스|무료|제공)$',
 ]
 
 STORE_NAME_IN_MENU_THRESHOLD = 0.7
 
 
-def is_valid_menu_name(menu_name: str, store_name: Optional[str] = None) -> bool:
+def is_valid_menu_name(menu_name: str, store_name: str | None = None) -> bool:
     """메뉴명 유효성 검증 (허수 제거)"""
     if not menu_name or not isinstance(menu_name, str):
         return False
@@ -70,6 +79,7 @@ def is_valid_menu_name(menu_name: str, store_name: Optional[str] = None) -> bool
 # ═══════════════════════════════════════════════════════════
 # 캐시
 # ═══════════════════════════════════════════════════════════
+
 
 class MenuCache:
     """메뉴 보강 캐시 (파일 기반)"""
@@ -100,7 +110,7 @@ class MenuCache:
         except Exception as e:
             logger.warning('menu_cache_save_failed', error=str(e))
 
-    def get(self, key: str) -> Optional[dict]:
+    def get(self, key: str) -> dict | None:
         with self._lock:
             return self._cache.get(key)
 
@@ -113,15 +123,14 @@ class MenuCache:
 # 메뉴 보강 서비스
 # ═══════════════════════════════════════════════════════════
 
+
 class MenuEnrichService:
     """메뉴 보강 서비스 (어댑터 오케스트레이션)"""
 
     def __init__(self):
         self.settings = get_settings()
         self.adapter = LocalSearchAdapter(settings=self.settings)
-        self.cache = MenuCache(
-            os.path.join(self.settings.cache_dir, 'menu', 'menu_cache.json')
-        )
+        self.cache = MenuCache(os.path.join(self.settings.cache_dir, 'menu', 'menu_cache.json'))
 
     def _build_query(self, record: CertRecord) -> str:
         parts = []
@@ -135,8 +144,11 @@ class MenuEnrichService:
         if record.biz_type:
             parts.append(record.biz_type)
 
-        if (record.raw_name and len(record.raw_name) > 2
-                and not any(re.match(p, record.raw_name) for p in INVALID_MENU_PATTERNS)):
+        if (
+            record.raw_name
+            and len(record.raw_name) > 2
+            and not any(re.match(p, record.raw_name) for p in INVALID_MENU_PATTERNS)
+        ):
             parts.append(record.raw_name)
 
         return ' '.join(parts[:3])
@@ -184,17 +196,19 @@ class MenuEnrichService:
 
             chunk_size = 20
             for i in range(0, len(needs_enrichment), chunk_size):
-                chunk = needs_enrichment[i:i + chunk_size]
+                chunk = needs_enrichment[i : i + chunk_size]
                 await asyncio.gather(*[enrich_one(r) for r in chunk])
                 logger.info(
                     'menu_enrich_progress',
                     processed=min(i + chunk_size, len(needs_enrichment)),
-                    total=len(needs_enrichment), enriched=enriched_count,
+                    total=len(needs_enrichment),
+                    enriched=enriched_count,
                 )
 
         self.cache.save()
         logger.info(
-            'menu_enrich_complete', enriched=enriched_count,
+            'menu_enrich_complete',
+            enriched=enriched_count,
             total=len(needs_enrichment),
             note='네이버/카카오 로컬 API는 메뉴 정보를 제공하지 않습니다. TouristInfo 상세 조회를 활용하세요.',
         )
@@ -206,7 +220,8 @@ class MenuEnrichService:
         kakao_task = asyncio.create_task(self._fetch_kakao_menu(client, query))
 
         done, pending = await asyncio.wait(
-            [naver_task, kakao_task], return_when=asyncio.FIRST_COMPLETED,
+            [naver_task, kakao_task],
+            return_when=asyncio.FIRST_COMPLETED,
         )
 
         result = {'menus': [], 'source': None}
@@ -273,32 +288,34 @@ class MenuEnrichService:
         return {'menus': [], 'source': source}
 
     def _apply_menus(self, record: CertRecord, data: dict) -> None:
-        """유효성 검증 후 레코드에 메뉴 적용"""
         menus = data.get('menus', [])
         source = data.get('source')
-
         if not menus:
             return
 
+        # 🆕 공통 유틸리티 사용
         valid_menus = [m for m in menus if is_valid_menu_name(m, record.raw_name)]
+        valid_menus = deduplicate_menus(valid_menus)
+
         if not valid_menus:
             return
 
         if record.main_menu:
-            all_menus = sorted(set([record.main_menu] + valid_menus))
+            all_menus = sorted({record.main_menu, *valid_menus})
             record.menus = all_menus
             if not record.menus_source:
                 record.menus_source = source
         else:
             record.main_menu = valid_menus[0]
             record.main_menu_source = source
-            record.menus = sorted(set(valid_menus))
+            record.menus = valid_menus
             record.menus_source = source
 
 
 # ═══════════════════════════════════════════════════════════
 # 진입점
 # ═══════════════════════════════════════════════════════════
+
 
 async def enrich_menus(records: list[CertRecord]) -> list[CertRecord]:
     """메뉴 보강 진입점"""

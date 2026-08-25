@@ -1,35 +1,30 @@
 """
 Silver Layer: 메뉴 추출 (NER + LLM 하이브리드)
 ================================================
-- 기존 ner/ 모듈 연동
-- 7계층 방어 체계 유지
-- L2 지능형 라우팅 (LLM 호출 최소화)
+⚠️ 주의: 이 파일은 silver/enrich/menu.py와 다릅니다!
 
-기존 참고:
-- ner/core/hybrid_extractor.py의 다차원 신뢰도 계산
-- ner/core/llm_verifier.py의 Few-shot + RAG
-- enrich/official_enricher.py의 7계층 방어
+비교:
+- silver/enrich/menu.py: 공식 API(네이버/카카오)에서 메뉴 보강 (현재 사용 중)
+- silver/menu_extract.py: 블로그/리뷰 텍스트에서 메뉴 추출 (Phase 4 예정)
 
-보존 사항:
-- 다차원 신뢰도 계산
-- Few-shot 프롬프트
-- RAG 컨텍스트 (업종 힌트)
-- 7계층 방어 체계
+사용 시점:
+- Phase 1~3: enrich/menu.py만 사용
+- Phase 4: menu_extract.py 활성화 (블로그/리뷰 데이터 수집 시작 시)
 
-개선 사항:
-- MenuExtractor 클래스로 캡슐화
-- QuotaManager 연동
-- 구조화 로깅
+로드맵:
+- Phase 4-A: 블로그/리뷰 수집 어댑터 구현 (adapters/blog_review/)
+- Phase 4-B: menu_extract.py의 extract_for_records() 완성
+- Phase 4-C: enrich/menu.py와 결과 병합 로직 구현
 """
+
 from __future__ import annotations
 
 import asyncio
-from typing import List, Dict, Optional
 
+from ..domain.menu import deduplicate_menus, is_valid_menu_name
 from ..domain.record import CertRecord
 from ..observability.logging import get_logger
 from ..settings import get_settings
-
 
 logger = get_logger(__name__)
 
@@ -57,6 +52,7 @@ class MenuExtractor:
         # NER 파이프라인 초기화
         try:
             from ..nlp.ner.predictor import MenuNERPredictor
+
             self.ner_pipeline = MenuNERPredictor()
             logger.info('menu_extractor_ner_initialized')
         except Exception as e:
@@ -68,6 +64,7 @@ class MenuExtractor:
         # LLM 검증기 초기화
         try:
             from ..nlp.llm.verifier import LLMVerifier
+
             self.llm_verifier = LLMVerifier()
             logger.info('menu_extractor_llm_initialized')
         except Exception as e:
@@ -78,11 +75,7 @@ class MenuExtractor:
 
         self._initialized = True
 
-    def extract_from_text(
-        self,
-        text: str,
-        store_name: str,
-    ) -> Dict:
+    def extract_from_text(self, text: str, store_name: str) -> dict:
         """
         텍스트에서 메뉴 추출
 
@@ -102,27 +95,26 @@ class MenuExtractor:
         if self.ner_pipeline:
             try:
                 result = self.ner_pipeline.predict(text, store_name=store_name)
-                menus = result.get('menus', [])
+                raw_menus = result.get('menus', [])
 
-                if menus:
-                    confidence = min(len(menus) * 0.3, 1.0)
+                # 🆕 공통 유틸리티로 필터링
+                valid_menus = [m for m in raw_menus if is_valid_menu_name(m, store_name)]
+                valid_menus = deduplicate_menus(valid_menus)
+
+                if valid_menus:
+                    confidence = min(len(valid_menus) * 0.3, 1.0)
                     return {
-                        'menus': menus,
+                        'menus': valid_menus,
                         'confidence': confidence,
                         'method': 'ner',
                     }
             except Exception as e:
-                logger.error(
-                    'menu_extract_ner_failed',
-                    error=str(e),
-                )
+                logger.error('menu_extract_ner_failed', error=str(e))
 
         # LLM 추출 시도 (NER 실패 시)
         if self.llm_verifier and self.llm_verifier.available:
             try:
-                menus = asyncio.run(
-                    self.llm_verifier.extract_menu_direct(text, store_name)
-                )
+                menus = asyncio.run(self.llm_verifier.extract_menu_direct(text, store_name))
                 if menus:
                     return {
                         'menus': menus,
@@ -139,8 +131,8 @@ class MenuExtractor:
 
     async def extract_for_records(
         self,
-        records: List[CertRecord],
-    ) -> List[CertRecord]:
+        records: list[CertRecord],
+    ) -> list[CertRecord]:
         """
         레코드 목록에 대해 메뉴 추출
 

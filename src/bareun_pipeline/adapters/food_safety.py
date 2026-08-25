@@ -16,18 +16,18 @@
 - 청크 크기 축소 (500 → 300, 서버 부하 감소)
 - 재시도 중복 제거 (벤더 레벨 vs 페이지 레벨)
 """
+
 from __future__ import annotations
 
-import json
 import os
 import time
-from typing import List, Optional, Dict, Any, Tuple
-from urllib.parse import unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from .base import BaseAdapter, parse_addr_tokens, match_prefixes
+from typing import Any
+from urllib.parse import unquote
+
 from ..domain.record import CertRecord
 from ..observability.logging import get_logger
-
+from .base import BaseAdapter, match_prefixes, parse_addr_tokens
 
 logger = get_logger(__name__)
 
@@ -73,24 +73,40 @@ class FoodSafetyAdapter(BaseAdapter):
     MFDS_URL_TPL = 'http://openapi.foodsafetykorea.go.kr/api/{key}/C004/json/{start}/{end}'
 
     # 수집 설정
-    PAGE_SIZE = 300              # 청크 크기 (서버 부하 감소)
-    TIMEOUT = 15                 # 요청 타임아웃 (빠른 실패 감지)
+    PAGE_SIZE = 300  # 청크 크기 (서버 부하 감소)
+    TIMEOUT = 15  # 요청 타임아웃 (빠른 실패 감지)
     REPLAY_MAX_AGE_DAYS = 7
 
     # 병렬 수집 설정
-    PARALLEL_PAGE_WORKERS = 6    # 병렬 워커 수
-    PAGE_MAX_RETRIES = 3         # 페이지별 최대 재시도
-    PAGE_RETRY_DELAY = 1.0       # 재시도 기본 대기 (초)
-    MAX_TOTAL_PAGES = 200        # 최대 페이지 상한 (무한 수집 방지)
+    PARALLEL_PAGE_WORKERS = 6  # 병렬 워커 수
+    PAGE_MAX_RETRIES = 3  # 페이지별 최대 재시도
+    PAGE_RETRY_DELAY = 1.0  # 재시도 기본 대기 (초)
+    MAX_TOTAL_PAGES = 200  # 최대 페이지 상한 (무한 수집 방지)
 
     # 필드 후보 (스키마 변경 대응)
-    FIELD_CANDIDATES: Dict[str, tuple] = {
+    FIELD_CANDIDATES: dict[str, tuple] = {
         'name': ('BSSH_NM', 'UPSO_NM', 'ENTRPS_NM', '업소명', '상호명', '영업소명'),
-        'addr': ('ADDR', 'SITE_ADDR', 'RDNMADR', 'ROAD_NM_ADDR', '도로명주소', '소재지도로명주소', '영업장소재지', '소재지'),
+        'addr': (
+            'ADDR',
+            'SITE_ADDR',
+            'RDNMADR',
+            'ROAD_NM_ADDR',
+            '도로명주소',
+            '소재지도로명주소',
+            '영업장소재지',
+            '소재지',
+        ),
         'lot': ('JIBUN_ADDR', 'LOT_ADDR', '지번주소'),
         'phone': ('TELNO', 'TEL', '전화번호', '업소전화번호'),
         'biz': ('INDUTY_NM', 'INDUTY_CD_NM', '업종명', '업태구분명'),
-        'designated': ('ASGN_FROM', 'ASGN_YMD', 'PRMISN_YMD', '지정일자', '허가일자', '지정시작일자'),
+        'designated': (
+            'ASGN_FROM',
+            'ASGN_YMD',
+            'PRMISN_YMD',
+            '지정일자',
+            '허가일자',
+            '지정시작일자',
+        ),
         'status': ('CLSBIZ_DVS_CD_NM', '영업상태', 'BIZ_STT_CD_NM'),
         'closed': ('CLSBIZ_DT', '폐업일자', 'CLOSE_DT'),
         'cancel': ('ASGN_CANCEL_YMD', '지정취소일자'),
@@ -136,10 +152,10 @@ class FoodSafetyAdapter(BaseAdapter):
     def _parse_rows(
         self,
         rows: list,
-        province: Optional[str],
-    ) -> List[CertRecord]:
+        province: str | None,
+    ) -> list[CertRecord]:
         """행 파싱"""
-        records: List[CertRecord] = []
+        records: list[CertRecord] = []
         prefixes = match_prefixes(province) if province else None
 
         for item in rows:
@@ -178,7 +194,7 @@ class FoodSafetyAdapter(BaseAdapter):
 
         return records
 
-    def _get_strategies(self) -> List[tuple]:
+    def _get_strategies(self) -> list[tuple]:
         """수집 전략 목록 반환"""
         strategies = []
 
@@ -195,7 +211,7 @@ class FoodSafetyAdapter(BaseAdapter):
     # 메인 수집 로직
     # ═══════════════════════════════════════════════════════════
 
-    def collect(self, province: Optional[str] = None) -> List[CertRecord]:
+    def collect(self, province: str | None = None) -> list[CertRecord]:
         """
         데이터 수집
 
@@ -279,7 +295,7 @@ class FoodSafetyAdapter(BaseAdapter):
         self,
         kind: str,
         url: str,
-        province: Optional[str],
+        province: str | None,
     ) -> list:
         """벤더에서 데이터 수집"""
         if kind == 'datago':
@@ -343,7 +359,7 @@ class FoodSafetyAdapter(BaseAdapter):
         self,
         page: int,
         page_size: int,
-    ) -> Optional[Tuple[list, int]]:
+    ) -> tuple[list, int] | None:
         """단일 페이지 수집 (지수 백오프 재시도)"""
         for attempt in range(1, self.PAGE_MAX_RETRIES + 1):
             result = self._fetch_mfds_page(page, page_size)
@@ -374,7 +390,7 @@ class FoodSafetyAdapter(BaseAdapter):
         self,
         page: int,
         page_size: int,
-    ) -> Optional[Tuple[list, int]]:
+    ) -> tuple[list, int] | None:
         """단일 페이지 수집 (재시도 없음)"""
         start = (page - 1) * page_size + 1
         end = page * page_size
@@ -505,7 +521,7 @@ class FoodSafetyAdapter(BaseAdapter):
                                     f.cancel()
                             break
 
-                except Exception as e:
+                except Exception:
                     failed_pages += 1
                     consecutive_failures += 1
 
@@ -524,7 +540,7 @@ class FoodSafetyAdapter(BaseAdapter):
     # 로컬 리플레이
     # ═══════════════════════════════════════════════════════════
 
-    def _replay_from_raw(self, province: Optional[str]) -> List[CertRecord]:
+    def _replay_from_raw(self, province: str | None) -> list[CertRecord]:
         """로컬 원본 파일에서 리플레이"""
         from ..bronze.raw_archiver import RawArchiver
 
